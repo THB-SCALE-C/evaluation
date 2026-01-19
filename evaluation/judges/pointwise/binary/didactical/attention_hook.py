@@ -27,3 +27,6 @@ class AttentionHookJudge(BaseJudge):
     alignment_learning_objective:BinaryAssessment = dspy.OutputField(desc="Does the hook clearly relate to the learning objectives rather than introducing unrelated fun facts?")
     
     alignment_further_content:BinaryAssessment = dspy.OutputField(desc="Does the hook clearly relate to the content?")
+
+
+    
