@@ -36,7 +36,7 @@ class ClozeTextRuleChecker(dspy.Module):
         )
 
         if slide.title:
-            title_too_long = len(slide.title)>50
+            title_too_long = len(slide.title) > 50
             self.evaluations["appropriate_title_length"] = BinaryAssessment(
                 score="yes" if not title_too_long else "no",
                 feedback=f"`title` has {"not" if title_too_long else ""} appropriate length",
@@ -44,6 +44,7 @@ class ClozeTextRuleChecker(dspy.Module):
 
         if slide.cloze_text:
             total_word_count = len(slide.cloze_text.split(" "))
+
             is_even = (slide.cloze_text.count("*") % 2 == 0)
             self.evaluations["valid_word_count"] = BinaryAssessment(
                 score="yes" if is_even else "no",
@@ -58,23 +59,16 @@ class ClozeTextRuleChecker(dspy.Module):
                 else "`cloze_text` has no adjacent blanks",
             )
 
-            text_too_long = len(slide.cloze_text) > 1000
-            self.evaluations["cloze_text_not_too_long"] = BinaryAssessment(
-                score="no" if text_too_long else "yes",
-                feedback="`cloze_text` exceed 1000 characters"
-                if text_too_long
-                else "`cloze_text` does not exceed 1000 characters",
+            not_appropriate_length = total_word_count > 85 and total_word_count < 65
+            self.evaluations["cloze_text_appropriate_length"] = BinaryAssessment(
+                score="no" if not_appropriate_length else "yes",
+                feedback=f"`cloze_text` has not appropriate length, having {total_word_count} words."
+                if not_appropriate_length
+                else "`cloze_text` has appropriate length",
             )
 
-            text_too_short = len(slide.cloze_text) < 200
-            self.evaluations["cloze_text_not_too_short"] = BinaryAssessment(
-                score="no" if text_too_short else "yes",
-                feedback="`cloze_text` has less than 200 characters"
-                if text_too_short
-                else "`cloze_text` does exceed 200 characters",
-            )
-
-            text_contains_double_line_break = slide.cloze_text.count("\n\n")>0
+            text_contains_double_line_break = slide.cloze_text.count(
+                "\n\n") > 0
             self.evaluations["has_no_double_linebreaks"] = BinaryAssessment(
                 score="no" if text_contains_double_line_break else "yes",
                 feedback="`cloze_text` wastes space with double linebreaks"
@@ -83,8 +77,8 @@ class ClozeTextRuleChecker(dspy.Module):
             )
 
             blank_words_count = slide.cloze_text.count("*")/2
-            too_many_blank_words = blank_words_count/total_word_count>0.33
-            too_few_blank_words = blank_words_count/total_word_count<0.05
+            too_many_blank_words = blank_words_count > 6
+            too_few_blank_words = blank_words_count < 4
 
             self.evaluations["enough_blanked_words"] = BinaryAssessment(
                 score="no" if too_few_blank_words else "yes",
@@ -100,10 +94,21 @@ class ClozeTextRuleChecker(dspy.Module):
                 else "`cloze_text` has not too many blanked words",
             )
 
+            if is_even:
+                blank_words = [s for i, s in enumerate(
+                    slide.cloze_text.split("*")) if i % 2 != 0]
+                has_too_long_blanks = any([len(s) > 35 for s in blank_words])
+                self.evaluations["has_too_long_blanks"] = BinaryAssessment(
+                    score="no" if has_too_long_blanks else "yes",
+                    feedback="`cloze_text` has too long blanked words"
+                    if has_too_long_blanks
+                    else "`cloze_text` has appropriate long blanked words",
+                )
+
         return dspy.Prediction(**self.evaluations)
 
 
-def has_adjacent_blanks(text:str):
+def has_adjacent_blanks(text: str):
     separators = ("", ", ", " and ", " or ")
     words_next_to_each_other = False
     i = 0
