@@ -2,7 +2,7 @@ from typing import Literal
 import dspy
 
 from evaluation.types.metric_types import BaseMetricType, BinaryMetricType
-from evaluation.types.assessment_types import BaseAssessment, BinaryAssessment
+from evaluation.types.assessment_types import BaseAssessment
 
 
 class BaseAggregator(dspy.Module):
@@ -60,9 +60,15 @@ class BaseAggregator(dspy.Module):
         return "\n".join(lines)
     
     @classmethod
-    def aggregate_binary(cls, result:dspy.Prediction, exclude_positive_feedback=False):
-        result_dict:dict[str,BinaryAssessment] = {k:v for k,v in dict(result).items() if k != "reasoning"}
-        metrics = [BinaryMetricType(name=k) for k in result_dict.keys()]
+    def aggregate_binary(cls, result:dspy.Prediction, exclude_positive_feedback=False, metric_type:Literal['binary', 'likert', 'continuous']="binary"):
+        result_dict:dict[str,BaseAssessment] = {}
+        metrics:list[BaseMetricType] = []
+        if metric_type == "binary":
+            result_dict = {k:v for k,v in dict(result).items() if k != "reasoning"}
+            metrics = [BinaryMetricType(name=k) for k in result_dict.keys()]
+        else:
+            result_dict = {k:v for k,v in dict(result).items() if k != "reasoning"}
+            metrics = [BaseMetricType(name=k) for k in result_dict.keys()]
         total_score = cls._aggregate_scores([v.score for  v in result_dict.values()])
         total_feedback = cls._aggregate_feedbacks(metrics, result_dict.values(),exclude_positive_feedback) # type:ignore
         return total_score,total_feedback
