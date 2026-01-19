@@ -39,7 +39,7 @@ class ClozeTextRuleChecker(dspy.Module):
             title_too_long = len(slide.title)>50
             self.evaluations["appropriate_title_length"] = BinaryAssessment(
                 score="yes" if not title_too_long else "no",
-                feedback=f"`title` has {"not" if not title_too_long else ""} appropriate length",
+                feedback=f"`title` has {"not" if title_too_long else ""} appropriate length",
             )
 
         if slide.cloze_text:
