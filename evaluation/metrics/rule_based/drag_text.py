@@ -14,6 +14,9 @@ class ClozeTextRuleChecker(dspy.Module):
         super().__init__(callbacks)
         self.evaluations = dict()
 
+    def __call__(self, slide: ExpectedSlide, *args, **kwargs) -> dspy.Prediction:
+        return super().__call__(slide, *args, **kwargs)
+
     def forward(self, slide: ExpectedSlide):
         has_user_instruction = bool(slide.user_instruction)
         self.evaluations["has_user_instructions"] = BinaryAssessment(

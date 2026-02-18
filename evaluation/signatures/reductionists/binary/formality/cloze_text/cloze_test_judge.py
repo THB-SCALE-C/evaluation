@@ -1,8 +1,8 @@
 from evaluation.types.assessment_types import BinaryAssessment
-from evaluation.judges.pointwise.binary.base import  BaseJudge
+from evaluation.judges.pointwise.binary.base import  ReductionistJudge
 import dspy
 
-class ClozeTestJudge(BaseJudge):
+class ClozeTestJudge(ReductionistJudge):
     """Assess the provided `slide` which is a cloze styled test with the following metrics.
     It is very important to be critical and exact because your assessment is required for important decisions to make.
     Avoid false optimism.

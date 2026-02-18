@@ -1,5 +1,5 @@
 import dspy
-from evaluation.aggregators.base import BaseAggregator
+from evaluation.judges.base import BaseAggregator
 from evaluation.judges.pointwise.binary.didactical.elicit_performance import ElicitPerformanceJudge
 from evaluation.judges.pointwise.binary.formality.cloze_text.rule_check import ClozeTextRuleChecker
 from evaluation.judges.pointwise.binary.formality.cloze_text.cloze_test_judge import ClozeTestJudge

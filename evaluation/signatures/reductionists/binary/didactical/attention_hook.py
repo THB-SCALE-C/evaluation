@@ -1,8 +1,8 @@
 from evaluation.types.assessment_types import BinaryAssessment
-from evaluation.judges.pointwise.binary.base import  BaseJudge
+from evaluation.signatures.reductionists.base import  ReductionistJudge
 import dspy
 
-class AttentionHookJudge(BaseJudge):
+class AttentionHookJudge(ReductionistJudge):
     """Assess the provided `slide` text and the following metrics. You task is to evaluate the first event of Gagné's 9 events of instruction: 'Gain Attention'.
     It is very important to be critical and exact because you assessment is required for important decisions to make.
     Avoid false optimism.

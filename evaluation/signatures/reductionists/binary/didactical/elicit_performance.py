@@ -1,8 +1,8 @@
 from evaluation.types.assessment_types import BinaryAssessment
-from evaluation.judges.pointwise.binary.base import  BaseJudge
+from evaluation.judges.pointwise.binary.base import  ReductionistJudge
 import dspy
 
-class ElicitPerformanceJudge(BaseJudge):
+class ElicitPerformanceJudge(ReductionistJudge):
     """Assess the provided `slide` (that is a practice task) text and the following metrics. You task is to evaluate the first event of Gagné's 9 events of instruction: 'elicit performance'.
     It is very important to be critical and exact because your assessment is required for important decisions to make.
     Avoid false optimism.
