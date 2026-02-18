@@ -44,7 +44,7 @@ class Evaluation(dspy.Prediction):
                 for k in metric_keys:
                     sub_metric = getattr(metric, k)
                     if isinstance(sub_metric,BaseAssessment):
-                        _sub_metrics[sub_metric]
+                        _sub_metrics[k] = sub_metric
                 metric_id = f"{metric.metric_type}:{key}"
                 _metrics[metric_id] = _sub_metrics
         return _metrics
