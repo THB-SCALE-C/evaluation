@@ -1,12 +1,13 @@
 from typing import ClassVar
 from pydantic import Field
-from evaluation.metrics.base import BaseMetric
+from evaluation.metrics.didactical._base import BaseDidacticalMetric
 from evaluation.types.assessment_types import BinaryAssessment
 
 
-class AssessPerformanceMetric(BaseMetric):
+class AssessPerformanceMetric(BaseDidacticalMetric):
     metric_name: ClassVar[str] = "assess_performance"
-
+    metric_type:ClassVar = "didactical"
+    
     summative_assessment_present: BinaryAssessment = Field(
         description="Is there at least one summative assessment item at the end of the unit?")
     mcq_stem_clarity_and_key_validity: BinaryAssessment = Field(

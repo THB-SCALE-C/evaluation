@@ -1,11 +1,13 @@
 from typing import ClassVar
 from pydantic import Field
 from evaluation.metrics.base import BaseMetric
+from evaluation.metrics.didactical._base import BaseDidacticalMetric
 from evaluation.types.assessment_types import BinaryAssessment
 
 
-class ProvideGuidanceMetric(BaseMetric):
+class ProvideGuidanceMetric(BaseDidacticalMetric):
     metric_name: ClassVar[str] = "provide_guidance"
+    metric_type:ClassVar = "didactical"
 
     presence_of_guidance_elements: BinaryAssessment = Field(
         description="Does the unit include at least one explicit guidance element (e.g., tip, checklist, hint, rule)?")

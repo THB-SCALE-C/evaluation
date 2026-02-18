@@ -1,11 +1,14 @@
 from pydantic import  Field
 from typing import ClassVar
 from evaluation.metrics.base import BaseMetric
+from evaluation.metrics.didactical._base import BaseDidacticalMetric
 from evaluation.types.assessment_types import BinaryAssessment
 
 
-class AttentionHookMetric(BaseMetric):
+class AttentionHookMetric(BaseDidacticalMetric):
     metric_name:ClassVar[str] = "attention_hook"
+    metric_type:ClassVar = "didactical"
+
     presence_of_hook:BinaryAssessment = Field(description="Is the hook presented as a realistic cyber security scenario or surprising cyber security fact that grabs attention while clearly connected to the overall topic?")
     salience:BinaryAssessment = Field(description="Is the hook surprising, emotionally salient, or personally relevant?")
     personal_salience:BinaryAssessment = Field(description="Does the hook address the reader personally or involve a personalized scenario?")

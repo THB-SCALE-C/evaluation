@@ -1,11 +1,13 @@
 from typing import ClassVar
 from pydantic import Field
 from evaluation.metrics.base import BaseMetric
+from evaluation.metrics.didactical._base import BaseDidacticalMetric
 from evaluation.types.assessment_types import BinaryAssessment
 
 
-class PresentContentMetric(BaseMetric):
+class PresentContentMetric(BaseDidacticalMetric):
     metric_name: ClassVar[str] = "present_content"
+    metric_type:ClassVar = "didactical"
 
     presence_and_completeness_of_core_content: BinaryAssessment = Field(
         description="Does the content include all core concepts explicitly required by the stated learning objective?")

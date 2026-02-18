@@ -1,11 +1,14 @@
 from typing import ClassVar
 from pydantic import Field
 from evaluation.metrics.base import BaseMetric
+from evaluation.metrics.didactical._base import BaseDidacticalMetric
 from evaluation.types.assessment_types import BinaryAssessment
 
 
-class EnhanceRetentionTransferMetric(BaseMetric):
+class EnhanceRetentionTransferMetric(BaseDidacticalMetric):
     metric_name: ClassVar[str] = "enhance_retention_transfer"
+    metric_type:ClassVar = "didactical"
+
 
     presence_of_summary_takeaways: BinaryAssessment = Field(
         description="Is there a final summary or list of key takeaways?")

@@ -1,11 +1,13 @@
 from typing import ClassVar
 from pydantic import Field
 from evaluation.metrics.base import BaseMetric
+from evaluation.metrics.didactical._base import BaseDidacticalMetric
 from evaluation.types.assessment_types import BinaryAssessment
 
 
-class InformObjectivesMetric(BaseMetric):
+class InformObjectivesMetric(BaseDidacticalMetric):
     metric_name: ClassVar[str] = "inform_objectives"
+    metric_type:ClassVar = "didactical"
 
     explicit_objective_statement: BinaryAssessment = Field(
         description="Is the learning objective clearly stated?")

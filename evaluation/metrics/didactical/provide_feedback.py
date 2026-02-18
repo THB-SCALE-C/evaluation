@@ -1,11 +1,13 @@
 from typing import ClassVar
 from pydantic import Field
 from evaluation.metrics.base import BaseMetric
+from evaluation.metrics.didactical._base import BaseDidacticalMetric
 from evaluation.types.assessment_types import BinaryAssessment
 
 
-class ProvideFeedbackMetric(BaseMetric):
+class ProvideFeedbackMetric(BaseDidacticalMetric):
     metric_name: ClassVar[str] = "provide_feedback"
+    metric_type:ClassVar = "didactical"
 
     presence_of_feedback: BinaryAssessment = Field(
         description="Does the learner receive feedback after submitting an answer?")

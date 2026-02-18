@@ -1,11 +1,13 @@
 from typing import ClassVar
 from pydantic import Field
 from evaluation.metrics.base import BaseMetric
+from evaluation.metrics.didactical._base import BaseDidacticalMetric
 from evaluation.types.assessment_types import BinaryAssessment
 
 
-class ElicitPerformanceMetric(BaseMetric):
+class ElicitPerformanceMetric(BaseDidacticalMetric):
     metric_name: ClassVar[str] = "elicit_performance"
+    metric_type:ClassVar = "didactical"
 
     presence_of_practice: BinaryAssessment = Field(
         description="Does the slide contain at least one explicit practice or performance task requiring an active learner response?")

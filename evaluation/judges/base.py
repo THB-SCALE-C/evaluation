@@ -1,4 +1,4 @@
-from typing import Literal, Tuple
+from typing import Any, Literal, Tuple
 import dspy
 from pydantic import BaseModel
 from evaluation.metrics.base import BaseMetric
@@ -35,12 +35,13 @@ class Evaluation(dspy.Prediction):
         }
 
     def _get_metrics(self):
-        _metrics: dict[str, dict[str, BinaryAssessment]] = {}
-        for metric in self.metrics:
-            metric_obj = self.__getattr__(metric.metric_name)
-            metric_keys = metric_obj.model_dump().keys()
-            metric_result = {k: getattr(metric_obj, k) for k in metric_keys}
-            _metrics[metric.metric_name] = metric_result
+        _metrics: dict[str, dict[str, BinaryAssessment | Any]] = {}
+        for key,metric in self.items():
+            if isinstance(metric, BaseMetric):
+                metric_keys = metric.model_dump().keys()
+                metric_result = {k: getattr(metric, k) for k in metric_keys}
+                metric_id = f"{metric.metric_type}:{key}"
+                _metrics[metric_id] = metric_result
         return _metrics
 
     @classmethod
@@ -59,13 +60,15 @@ class Evaluation(dspy.Prediction):
         return sum([w*s for w, s in zip(weights, _scores)])
 
     @classmethod
-    def _aggregate_feedbacks(cls, metrics: dict[str, BaseAssessment], exclude_positive_feedback=False):
+    def _aggregate_feedbacks(cls, metrics: dict[str, BaseAssessment|Any], exclude_positive_feedback=False):
         rows = []
         for m, a in metrics.items():
+            if not isinstance(a, BaseAssessment):
+                continue
             include_feedback = not (
                 exclude_positive_feedback and a.score == a.max)
             feedback = a.feedback if include_feedback else ""
-            rows.append((str(m), str(a.score), str(a.scale), str(feedback)))
+            rows.append((m, str(a.score), str(a.scale), str(feedback)))
 
         headers = ("Metric", "Score", "Scale", "Feedback")
         widths = [len(h) for h in headers]

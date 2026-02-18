@@ -1,11 +1,13 @@
 from typing import ClassVar
 from pydantic import Field
 from evaluation.metrics.base import BaseMetric
+from evaluation.metrics.didactical._base import BaseDidacticalMetric
 from evaluation.types.assessment_types import BinaryAssessment
 
 
-class StimulateRecallMetric(BaseMetric):
+class StimulateRecallMetric(BaseDidacticalMetric):
     metric_name: ClassVar[str] = "stimulate_recall"
+    metric_type:ClassVar = "didactical"
 
     presence_of_activation_stimulus: BinaryAssessment = Field(
         description="Does the unit begin with an explicit question or reflection prompt that asks the learner to recall prior knowledge or experience?")
