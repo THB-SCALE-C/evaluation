@@ -43,7 +43,7 @@ class Evaluation(dspy.Prediction):
                 # SUB METRICS WHICH ARE OF TYPE BASE_ASSESSMENT
                 for k in metric_keys:
                     sub_metric = getattr(metric, k)
-                    if isinstance(sub_metric,BaseMetric):
+                    if isinstance(sub_metric,BaseAssessment):
                         _sub_metrics[sub_metric]
                 metric_id = f"{metric.metric_type}:{key}"
                 _metrics[metric_id] = _sub_metrics
