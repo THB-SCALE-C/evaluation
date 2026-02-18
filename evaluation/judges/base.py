@@ -35,13 +35,18 @@ class Evaluation(dspy.Prediction):
         }
 
     def _get_metrics(self):
-        _metrics: dict[str, dict[str, BinaryAssessment | Any]] = {}
+        _metrics: dict[str, dict[str, BaseAssessment]] = {}
         for key,metric in self.items():
             if isinstance(metric, BaseMetric):
                 metric_keys = metric.model_dump().keys()
-                metric_result = {k: getattr(metric, k) for k in metric_keys}
+                _sub_metrics = {}
+                # SUB METRICS WHICH ARE OF TYPE BASE_ASSESSMENT
+                for k in metric_keys:
+                    sub_metric = getattr(metric, k)
+                    if isinstance(sub_metric,BaseMetric):
+                        _sub_metrics[sub_metric]
                 metric_id = f"{metric.metric_type}:{key}"
-                _metrics[metric_id] = metric_result
+                _metrics[metric_id] = _sub_metrics
         return _metrics
 
     @classmethod
@@ -60,11 +65,9 @@ class Evaluation(dspy.Prediction):
         return sum([w*s for w, s in zip(weights, _scores)])
 
     @classmethod
-    def _aggregate_feedbacks(cls, metrics: dict[str, BaseAssessment|Any], exclude_positive_feedback=False):
+    def _aggregate_feedbacks(cls, metrics: dict[str, BaseAssessment], exclude_positive_feedback=False):
         rows = []
         for m, a in metrics.items():
-            if not isinstance(a, BaseAssessment):
-                continue
             include_feedback = not (
                 exclude_positive_feedback and a.score == a.max)
             feedback = a.feedback if include_feedback else ""
