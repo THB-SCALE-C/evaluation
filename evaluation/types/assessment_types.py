@@ -7,6 +7,7 @@ class BaseAssessment(BaseModel):
     scale: ClassVar[tuple[str, str]]
     max: ClassVar[str]
     min: ClassVar[str]
+    criterion:Optional[str] = None
     score: int | float | Literal["yes", "no"]
     feedback: str = Field(
         description="Give detailed feedback on how you made your scoring-decision. Provide details on what justifies your decision.")

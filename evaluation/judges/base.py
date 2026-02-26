@@ -1,3 +1,4 @@
+import json
 from typing import Any, Literal, Tuple
 import dspy
 from pydantic import BaseModel
@@ -13,8 +14,17 @@ class Evaluation(dspy.Prediction):
     def __repr__(self):
         return f"Total Score: {self.get_total_score()}\n---\nFeedback:\n{self.get_feedback()}"
 
-    def get_feedback(self, exclude_positive_feedback=False) -> str:
-        return "\n\n".join(f"## {k}\n{feedback}" for k, feedback in self.get_feedback_per_metric(exclude_positive_feedback).items())
+    def get_feedback(self, exclude_positive_feedback=False, json_formatted=True) -> str:
+        base = f"The evaluation assigned a score of {self.get_total_score()}/1. Here is a detailed evaluation report."
+        if json_formatted:
+            dict_desc="Note: The report is written in JSON-format. Each assessment contains a description on what was assessed in `criterion`, the assessment score in `score`, its respective scale in `scale`, and detailed feedback in `feedback`."
+            return base + "\n\n" + dict_desc + "\n\n" + json.dumps(self.get_feedback_dict(exclude_positive_feedback), indent=4)
+        return base+"\n\n".join(f"### {k}\n{feedback}" for k, feedback in self.get_feedback_per_metric(exclude_positive_feedback).items())
+    
+    def get_feedback_dict(self, exclude_positive_feedback=False) -> dict[str, Any]:
+        metrics = self._get_metrics()
+        metrics = {k: {k2: {**dict(v2),"scale":str(v2.scale)} for k2, v2 in v.items() if (not exclude_positive_feedback) or (v2.score != v2.max)} for k, v in metrics.items()}
+        return metrics
 
     def get_total_score(self) -> float:
         scores = self.get_total_score_per_metric().values()
@@ -44,6 +54,7 @@ class Evaluation(dspy.Prediction):
                 for k in metric_keys:
                     sub_metric = getattr(metric, k)
                     if isinstance(sub_metric,BaseAssessment):
+                        sub_metric.criterion = metric.__class__.model_fields[k].description
                         _sub_metrics[k] = sub_metric
                 metric_id = f"{metric.metric_type}:{key}"
                 _metrics[metric_id] = _sub_metrics
