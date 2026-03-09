@@ -1,6 +1,5 @@
 from typing import Any, List, Tuple
 import dspy
-from pydantic import BaseModel
 from evaluation.metrics.base import BaseMetric
 from evaluation.signatures.judgement import Judgement
 from .base import Evaluation

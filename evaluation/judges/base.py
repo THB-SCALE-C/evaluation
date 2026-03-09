@@ -19,7 +19,7 @@ class Evaluation(dspy.Prediction):
         if json_formatted:
             dict_desc="Note: The report is written in JSON-format. Each assessment contains a description on what was assessed in `criterion`, the assessment score in `score`, its respective scale in `scale`, and detailed feedback in `feedback`."
             return base + "\n\n" + dict_desc + "\n\n" + json.dumps(self.get_feedback_dict(exclude_positive_feedback), indent=4)
-        return base+"\n\n".join(f"### {k}\n{feedback}" for k, feedback in self.get_feedback_per_metric(exclude_positive_feedback).items())
+        return base+"\n\n"+"\n\n".join(f"### {k}\n{feedback}" for k, feedback in self.get_feedback_per_metric(exclude_positive_feedback).items())
     
     def get_feedback_dict(self, exclude_positive_feedback=False) -> dict[str, Any]:
         metrics = self._get_metrics()
@@ -48,13 +48,17 @@ class Evaluation(dspy.Prediction):
         _metrics: dict[str, dict[str, BaseAssessment]] = {}
         for key,metric in self.items():
             if isinstance(metric, BaseMetric):
-                metric_keys = metric.model_dump().keys()
+                metric_items = metric.model_dump().items()
                 _sub_metrics = {}
                 # SUB METRICS WHICH ARE OF TYPE BASE_ASSESSMENT
-                for k in metric_keys:
+                for k,_ in metric_items:
+                    v = getattr(metric,k)
+                    if not isinstance(v, BaseAssessment):
+                        continue
                     sub_metric = getattr(metric, k)
                     if isinstance(sub_metric,BaseAssessment):
-                        sub_metric.criterion = metric.__class__.model_fields[k].description
+                        crit = metric.__class__.model_fields.get(k)
+                        sub_metric.criterion = crit.description if crit and hasattr(crit,"description") else k
                         _sub_metrics[k] = sub_metric
                 metric_id = f"{metric.metric_type}:{key}"
                 _metrics[metric_id] = _sub_metrics

@@ -8,10 +8,11 @@ from evaluation.types.assessment_types import BinaryAssessment
 class DragTextRuleBased(BaseRuleMetric):
     metric_name:ClassVar = "drag_text"
     metric_type:ClassVar = "rule_based"
-    required_slide_type:ClassVar = "cloze_text"
+    required_slide_type:ClassVar = "drag_text"
     title: str | None = None
     cloze_text: str | None = None
     user_instructions: str | None = None
+    distractors:list|None = None
 
     @cached_property
     def _cloze_stats(self) -> dict[str, int | float | bool]:
