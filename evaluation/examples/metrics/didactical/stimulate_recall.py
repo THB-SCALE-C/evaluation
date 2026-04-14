@@ -1,7 +1,7 @@
 from typing import ClassVar
 from pydantic import Field
 from evaluation.metrics.base import BaseMetric
-from evaluation.metrics.didactical._base import BaseDidacticalMetric
+from evaluation.metrics.base_didactical import BaseDidacticalMetric
 from evaluation.types.assessment_types import BinaryAssessment
 
 

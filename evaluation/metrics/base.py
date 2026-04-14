@@ -7,7 +7,5 @@ class BaseMetric(BaseModel):
     metric_type:ClassVar[str]
     required_slide_type:ClassVar[str|None] = None
     is_llm_judge:ClassVar = False
-    slide_idx:int|None = None
+    index_:int|None = None
 
-
-    
