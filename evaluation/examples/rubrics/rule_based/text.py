@@ -2,9 +2,9 @@ from typing import ClassVar, Tuple
 import re
 
 from creator.dspy_components import Text
-from evaluation.metrics import BaseRuleMetric
+from evaluation.rubrics import BaseRuleRubric
 
-class TextRuleBased(BaseRuleMetric[Text]):
+class TextRuleBased(BaseRuleRubric[Text]):
     metric_name: ClassVar = "text"
     metric_type: ClassVar = "rule_based"
     required_slide_type: ClassVar = "text"

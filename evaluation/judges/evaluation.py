@@ -1,12 +1,12 @@
 from typing import Any
 import dspy
 
-from evaluation.metrics.base import BaseMetric
-from evaluation.types.assessment_types import BaseAssessment
+from evaluation.rubrics.base import BaseRubric
+from evaluation.types.assessment_types import BaseMetricType
 
 
 class Evaluation(dspy.Prediction):
-    def __init__(self, results: dict[str, dict[str, dict[str, BaseMetric]]], *args, **kwargs):
+    def __init__(self, results: dict[str, dict[str, dict[str, BaseRubric]]], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.results = results
 
@@ -51,17 +51,17 @@ class Evaluation(dspy.Prediction):
         return self._combine_feedback_markdown(exclude_positive_feedback=exclude_positive_feedback,md_header_level=md_header_level)
 
     def _iter_assessments(self, data: Any):
-        if isinstance(data, BaseMetric):
+        if isinstance(data, BaseRubric):
             yield from self._assessments_from_metric(data)
             return
         if isinstance(data, dict):
             for value in data.values():
                 yield from self._iter_assessments(value)
 
-    def _assessments_from_metric(self, metric: BaseMetric):
+    def _assessments_from_metric(self, metric: BaseRubric):
         for key in metric.model_dump():
             value = getattr(metric, key, None)
-            if isinstance(value, BaseAssessment):
+            if isinstance(value, BaseMetricType):
                 if not value.criterion:
                     desc = metric.__class__.model_fields.get(key)
                     value.criterion = desc.description if desc else key
@@ -73,7 +73,7 @@ class Evaluation(dspy.Prediction):
         heading_level: int,
         exclude_positive_feedback: bool,
     ) -> list[str]:
-        if isinstance(data, BaseMetric):
+        if isinstance(data, BaseRubric):
             table = self._metric_table_markdown(
                 data, exclude_positive_feedback=exclude_positive_feedback)
             return [table] if table else []
@@ -83,7 +83,7 @@ class Evaluation(dspy.Prediction):
 
         sections: list[str] = []
         for key, value in data.items():
-            if isinstance(value, (dict, BaseMetric)):
+            if isinstance(value, (dict, BaseRubric)):
                 sections.append(f"{'#' * min(heading_level, 6)} {key}")
                 sections.extend(
                     self._build_markdown_sections(
@@ -94,11 +94,11 @@ class Evaluation(dspy.Prediction):
                 )
         return sections
 
-    def _metric_table_markdown(self, metric: BaseMetric, exclude_positive_feedback: bool) -> str:
+    def _metric_table_markdown(self, metric: BaseRubric, exclude_positive_feedback: bool) -> str:
         rows: list[tuple[str, str, str, str]] = []
         for key in metric.model_fields:
             assessment = getattr(metric, key, None)
-            if not isinstance(assessment, BaseAssessment):
+            if not isinstance(assessment, BaseMetricType):
                 continue
             if exclude_positive_feedback and self._is_positive_assessment(assessment):
                 continue
@@ -133,7 +133,7 @@ class Evaluation(dspy.Prediction):
         body = [fmt_row(row) for row in rows]
         return "\n".join([header, separator, *body])
 
-    def _is_positive_assessment(self, assessment: BaseAssessment) -> bool:
+    def _is_positive_assessment(self, assessment: BaseMetricType) -> bool:
         score = assessment.score
         max_value = getattr(assessment, "max", None)
 
@@ -150,7 +150,7 @@ class Evaluation(dspy.Prediction):
 
         return False
 
-    def _score_to_numeric(self, assessment: BaseAssessment) -> float:
+    def _score_to_numeric(self, assessment: BaseMetricType) -> float:
         score = assessment.score
 
         if isinstance(score, str):
@@ -164,10 +164,7 @@ class Evaluation(dspy.Prediction):
                 return parsed
             return 0.0
 
-        if isinstance(score, (int, float)):
-            return float(score)
-
-        return 0.0
+        return (score - assessment.min) / (assessment.max - assessment.min)
 
     @staticmethod
     def _to_float(value: Any) -> float | None:
@@ -188,7 +185,7 @@ class Evaluation(dspy.Prediction):
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
 
-        if isinstance(value, BaseAssessment):
+        if isinstance(value, BaseMetricType):
             if exclude_positive_feedback and self._is_positive_assessment(value):
                 return None
             return {
@@ -196,7 +193,7 @@ class Evaluation(dspy.Prediction):
                 "feedback": value.feedback,
             }
 
-        if isinstance(value, BaseMetric):
+        if isinstance(value, BaseRubric):
             out: dict[str, Any] = {}
             for key in value.model_dump():
                 converted = self._to_plain_dict(

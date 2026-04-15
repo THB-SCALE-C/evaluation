@@ -1,7 +1,7 @@
-from typing import Any, List, Tuple
+from typing import Any, ClassVar, List, Tuple, Type, get_origin
 import dspy
-from evaluation.metrics import BaseMetric
-from evaluation.metrics import BaseRuleMetric
+from evaluation.rubrics import BaseRubric
+from evaluation.rubrics import BaseRuleRubric
 from evaluation.signatures.judgement import Judgement
 from .evaluation import Evaluation
 from creator.dspy_components.__base__ import BaseComponent
@@ -13,14 +13,17 @@ class Judge(dspy.Module):
     Metrics are defined by the provided metrics list, and base instructions can be used to
     tune overall judging behavior (for example, increasing criticalness).
 
-    Import metrics via `evaluation.metrics`
+    Import rubrics via `evaluation.rubrics`
 
     Add `dspy.InputFields` under `**context`, provide a tuple of description adn type
     """
 
-    def __init__(self, llm: dspy.LM, metrics: list[type[BaseMetric | BaseRuleMetric]], cot=False, base_instructions: str | None = None, **context: dict[str, Tuple[str, type]]):
+    def __init__(self, llm: dspy.LM, metrics: list[type[BaseRubric | BaseRuleRubric]], cot=False, base_instructions: str | None = None, reduce_to_signature_level:bool=False, **context: dict[str, Tuple[str, type]]):
         self.metrics = metrics
+        self.reduce_to_signature_level = reduce_to_signature_level
         self.judgement = Judgement
+        self._flattened_metric_map: dict[str, tuple[str, str]] = {}
+        self._rubric_models_by_name: dict[str, type[BaseRubric]] = {} # type:ignore
         #
         # APPEND CONTEXT INPUTFIELDS
         for key, (desc, type) in context.items():
@@ -31,6 +34,7 @@ class Judge(dspy.Module):
         self.judge_metrics = []
         for metric in metrics:
             if getattr(metric, "is_llm_judge"):
+                self._rubric_models_by_name[metric.metric_name] = metric
                 self.judge_metrics.append((
                     metric.metric_name, dspy.OutputField(desc=metric.__doc__), metric))
         #
@@ -40,15 +44,18 @@ class Judge(dspy.Module):
         #
         # INIT PREDICTOR ACCORDINGLY
         if self.judge_metrics:
-            for m in self.judge_metrics:
-                self.judgement =self.judgement.append(*m)
+            if self.reduce_to_signature_level:
+                self.judgement = self._reduce_to_signature_level()
+            else:
+                for m in self.judge_metrics:
+                    self.judgement = self.judgement.append(*m)
         self.judge = dspy.Predict(self.judgement)
         if cot:
             self.judge = dspy.ChainOfThought(self.judgement)
         self.judge.set_lm(llm)
 
     def forward(self, slides: List[BaseComponent],  **context: dict[str, Any]) -> Evaluation:
-        final_results:dict[str,dict[str,dict[str,BaseMetric]]] = {}
+        final_results:dict[str,dict[str,dict[str,BaseRubric]]] = {}
         if self.judge_metrics:
             result_judge = self.judge(
                 slides=[s.model_dump() for s in slides], **context)
@@ -61,15 +68,38 @@ class Judge(dspy.Module):
         return super().__call__(slides, *args, **context) # type:ignore
 
     def _handle_judge_metric_results(self, result: dspy.Prediction, processed_results) -> dict:
-        result_dict = result.toDict()
-        for key in result_dict:
-            metric_result: BaseMetric = getattr(result, key)
+        if self.reduce_to_signature_level:
+            metric_results = self._restore_metrics_from_signature(result)
+        else:
+            metric_results = []
+            for key in result.toDict():
+                metric_result = getattr(result, key, None)
+                if isinstance(metric_result, BaseRubric):
+                    metric_results.append(metric_result)
+
+        for metric_result in metric_results:
             if not metric_result.required_slide_type:
                 processed_results.setdefault("unit_level",{}).setdefault(metric_result.metric_type, {}).setdefault(metric_result.metric_name, metric_result)
             else:
                 processed_results.setdefault("slide_level",{}).setdefault(
                             f"slide-{metric_result.index_}-{metric_result.metric_type}",{}).setdefault(metric_result.metric_name, metric_result)
         return processed_results
+
+    def _restore_metrics_from_signature(self, result: dspy.Prediction) -> list[BaseRubric]:
+        payload_by_metric: dict[str, dict[str, Any]] = {}
+        for output_name, value in result.toDict().items():
+            mapped = self._flattened_metric_map.get(output_name)
+            if not mapped:
+                continue
+            metric_name, field_name = mapped
+            payload_by_metric.setdefault(metric_name, {})[field_name] = value
+
+        restored: list[BaseRubric] = []
+        for metric_name, payload in payload_by_metric.items():
+            rubric_model = self._rubric_models_by_name.get(metric_name)
+            if rubric_model:
+                restored.append(rubric_model(**payload))
+        return restored
 
     def _handle_rule_based_metrics(self, slides: List[BaseComponent], processed_results: dict) -> dict:
         for i, slide in enumerate(slides):
@@ -81,3 +111,27 @@ class Judge(dspy.Module):
                         processed_results.setdefault("slide_level",{}).setdefault(
                             f"slide-{i}-{slide_type}",{}).setdefault("rule_based", result)
         return processed_results
+
+    def _reduce_to_signature_level(self):
+        signature = self.judgement
+        flattened_fields: dict[str, tuple[str, str]] = {}
+
+        for metric_name, _, rubric in self.judge_metrics:
+            for field_name, field_info in rubric.model_fields.items():
+                if get_origin(field_info.annotation) is ClassVar:
+                    continue
+                if not field_info.is_required():
+                    continue
+                output_name = f"{metric_name}_{field_name}"
+                signature = signature.append(
+                    output_name,
+                    dspy.OutputField(
+                        desc=field_info.description or f"{metric_name}.{field_name}"
+                    ),
+                    field_info.annotation,
+                )
+                flattened_fields[output_name] = (metric_name, field_name)
+
+        self._flattened_metric_map = flattened_fields
+        self.judgement = signature
+        return self.judgement 

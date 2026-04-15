@@ -1,8 +1,8 @@
 from typing import ClassVar, Tuple
-from evaluation.metrics import BaseRuleMetric
+from evaluation.rubrics import BaseRuleRubric
 from creator.dspy_components import ClozeTest
 
-class DragTextRuleBased(BaseRuleMetric[ClozeTest]):
+class DragTextRuleBased(BaseRuleRubric[ClozeTest]):
     metric_name:ClassVar = "drag_text"
     metric_type:ClassVar = "rule_based"
     required_slide_type:ClassVar = "drag_text"

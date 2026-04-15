@@ -1,11 +1,11 @@
 from abc import abstractmethod
 from typing import Any, ClassVar, Tuple
 import pydantic
-from evaluation.metrics.base import BaseMetric
-from evaluation.types.assessment_types import BaseAssessment, BinaryAssessment
+from evaluation.rubrics.base import BaseRubric
+from evaluation.types.assessment_types import BaseMetricType, BinaryMetricType
 
 
-class BaseRuleMetric[T]():
+class BaseRuleRubric[T]():
     """
     Rule based metric checker. 
     Define Metrics as instance functions that return `Tuple[bool, str (feedback)]`, use `def check` for auto suggestion.
@@ -26,7 +26,7 @@ class BaseRuleMetric[T]():
     required_slide_type:ClassVar = ""
     is_llm_judge = False
 
-    def __new__(cls, data: T, index:int|None =None) -> BaseAssessment:
+    def __new__(cls, data: T, index:int|None =None) -> BaseMetricType:
         return super().__new__(cls)._evaluate(data,index)
 
     
@@ -41,17 +41,17 @@ class BaseRuleMetric[T]():
                 if not res:
                     continue
                 checked, feedback = res
-                evals[key] = BinaryAssessment(
+                evals[key] = BinaryMetricType(
                     criterion=key,
                     score="yes" if checked else "no",
                     feedback=feedback
                 )
-        fields = {key: BaseAssessment for key in evals.keys()} \
+        fields = {key: BaseMetricType for key in evals.keys()} \
             | {"metric_type": (ClassVar, self.metric_type), "metric_name": (ClassVar, self.metric_name), "required_slide_type":(ClassVar, self.required_slide_type),
                "index_":int|None}
         model = pydantic.create_model(
             self.__class__.__name__,
-            __base__=BaseMetric,
+            __base__=BaseRubric,
               **fields)  # type:ignore
         evals["index_"] = index
         return model(**evals)

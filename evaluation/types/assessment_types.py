@@ -2,18 +2,18 @@ from typing import ClassVar, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-class BaseAssessment(BaseModel):
+class BaseMetricType(BaseModel):
     type: ClassVar[str]
     scale: ClassVar[tuple[str, str]]
-    max: ClassVar[str|int]
-    min: ClassVar[str|int]
+    max: ClassVar[int]
+    min: ClassVar[int]
     criterion:Optional[str] = None
     score: int | float | Literal["yes", "no"]
     feedback: str = Field(
         description="Give detailed feedback on how you made your scoring-decision. Provide details on what justifies your decision.")
 
 
-class BinaryAssessment(BaseAssessment):
+class BinaryMetricType(BaseMetricType):
     type: ClassVar[str] = "binary"
     scale: ClassVar[tuple[str, str]] = ("yes", "no")
     max: ClassVar[str] = "yes"# type: ignore
@@ -23,7 +23,7 @@ class BinaryAssessment(BaseAssessment):
         description="Give detailed feedback on how you made your scoring-decision. Provide details on what justifies your decision.")
 
 
-class LikertAssessment(BaseAssessment):
+class LikertMetricType(BaseMetricType):
     type: ClassVar[str] = "likert"
     scale: ClassVar[tuple[str, str]] = ("1", "5")
     max: ClassVar[int] = 5# type: ignore

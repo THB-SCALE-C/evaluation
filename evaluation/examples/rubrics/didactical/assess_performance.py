@@ -1,26 +1,26 @@
 from typing import ClassVar
 from pydantic import Field
-from evaluation.metrics.base_didactical import BaseDidacticalMetric
-from evaluation.types.assessment_types import BinaryAssessment
+from evaluation.rubrics.base_didactical import BaseDidacticalRubric
+from evaluation.types.assessment_types import BinaryMetricType
 
 
-class AssessPerformanceMetric(BaseDidacticalMetric):
+class AssessPerformanceMetric(BaseDidacticalRubric):
     metric_name: ClassVar[str] = "assess_performance"
     metric_type:ClassVar = "didactical"
     
-    summative_assessment_present: BinaryAssessment = Field(
+    summative_assessment_present: BinaryMetricType = Field(
         description="Is there at least one summative assessment item at the end of the unit?")
-    mcq_stem_clarity_and_key_validity: BinaryAssessment = Field(
+    mcq_stem_clarity_and_key_validity: BinaryMetricType = Field(
         description="Is the question clearly worded, and is exactly one answer clearly correct based on the content?")
-    distractor_plausibility: BinaryAssessment = Field(
+    distractor_plausibility: BinaryMetricType = Field(
         description="Are incorrect answer options plausible and based on common learner errors?")
-    independence_from_guidance: BinaryAssessment = Field(
+    independence_from_guidance: BinaryMetricType = Field(
         description="Does the assessment avoid hints, explanations, or guiding language?")
-    application_related_assessment: BinaryAssessment = Field(
+    application_related_assessment: BinaryMetricType = Field(
         description="Does the question require applying knowledge to a realistic workplace scenario?")
-    compactness: BinaryAssessment = Field(
+    compactness: BinaryMetricType = Field(
         description="Does the assessment consist of only a small number of focused items (e.g., <=5)?")
-    alignment_learning_objective: BinaryAssessment = Field(
+    alignment_learning_objective: BinaryMetricType = Field(
         description="Do the assessment items directly test the learning objective?")
-    alignment_content: BinaryAssessment = Field(
+    alignment_content: BinaryMetricType = Field(
         description="Are all assessment items covered by the instructional content?")
