@@ -32,10 +32,10 @@ class Evaluation(dspy.Prediction):
 
     def get_assessment_dict(self, exclude_positive_feedback: bool = False, flatten: bool = False, normalize: bool = False):
         serialized = self._to_plain_dict(
-            self.results, exclude_positive_feedback=exclude_positive_feedback, normalize=False
+            self.results, exclude_positive_feedback=exclude_positive_feedback, normalize=normalize
         )
         if flatten:
-            return self._flatten_metrics(serialized)
+            return self._flatten_metrics(serialized, prefix="")
         if isinstance(serialized, dict):
             return serialized
         return {"results": serialized}
@@ -87,11 +87,10 @@ class Evaluation(dspy.Prediction):
                     value.criterion = desc.description if desc else key
                 yield metric, value
 
-
     def _sanitize_metric_key(self, key: str) -> str:
         key = re.sub(r"[^a-zA-Z0-9_./ -]", "_", key).strip()
         return key[:240] if key else "judge.metric"
-    
+
     def _flatten_metrics(self, payload, prefix="judge"):
         metrics = {}
 
@@ -123,7 +122,6 @@ class Evaluation(dspy.Prediction):
 
         visit(payload, prefix)
         return metrics
-
 
     def _build_markdown_sections(
         self,
@@ -290,6 +288,7 @@ class Evaluation(dspy.Prediction):
                 return None
             if normalize:
                 return {
+                    **value.model_dump(),
                     **self._normalize(value),
                     "feedback": value.feedback,
                 }
@@ -301,6 +300,7 @@ class Evaluation(dspy.Prediction):
                 converted = self._to_plain_dict(
                     getattr(value, key, None),
                     exclude_positive_feedback=exclude_positive_feedback,
+                    normalize=normalize
                 )
                 if converted is not None:
                     out[key] = converted
@@ -310,7 +310,8 @@ class Evaluation(dspy.Prediction):
             out: dict[str, Any] = {}
             for key, item in value.items():
                 converted = self._to_plain_dict(
-                    item, exclude_positive_feedback=exclude_positive_feedback
+                    item, exclude_positive_feedback=exclude_positive_feedback,
+                    normalize=normalize
                 )
                 if converted is not None:
                     out[str(key)] = converted
@@ -321,7 +322,8 @@ class Evaluation(dspy.Prediction):
                 converted
                 for converted in (
                     self._to_plain_dict(
-                        item, exclude_positive_feedback=exclude_positive_feedback
+                        item, exclude_positive_feedback=exclude_positive_feedback,
+                        normalize=normalize
                     )
                     for item in value
                 )
@@ -330,12 +332,14 @@ class Evaluation(dspy.Prediction):
 
         if hasattr(value, "model_dump") and callable(value.model_dump):
             return self._to_plain_dict(
-                value.model_dump(), exclude_positive_feedback=exclude_positive_feedback
+                value.model_dump(), exclude_positive_feedback=exclude_positive_feedback,
+                normalize=normalize
             )
 
         if hasattr(value, "__dict__"):
             return self._to_plain_dict(
-                vars(value), exclude_positive_feedback=exclude_positive_feedback
+                vars(value), exclude_positive_feedback=exclude_positive_feedback,
+                normalize=normalize
             )
 
         return str(value)
