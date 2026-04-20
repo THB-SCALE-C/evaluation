@@ -1,10 +1,8 @@
 from typing import Tuple
-
 import dspy
 from evaluation.judges.judge import Judge
-from evaluation.rubrics.base import BaseRubric
-from evaluation.examples.metrics.didactical.elicit_performance import ElicitPerformanceMetric
-from evaluation.examples.metrics.rule_based.drag_text import DragTextRuleBased
+from evaluation.examples.rubrics.didactical.elicit_performance import ElicitPerformanceMetric
+from evaluation.examples.rubrics.rule_based.drag_text import DragTextRuleBased
 
 
 class ClozeTestJudge(Judge):

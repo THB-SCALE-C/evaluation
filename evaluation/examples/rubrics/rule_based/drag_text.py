@@ -108,7 +108,7 @@ class DragTextRuleBased(BaseRuleRubric[ClozeTest]):
         return True, "`cloze_text` has an appropriate amount of blanked words"
 
 
-    def check_has_too_long_blanks(self, data: ClozeTest) -> Tuple[bool, str]:
+    def check_has_not_too_long_blanks(self, data: ClozeTest) -> Tuple[bool, str]:
         text = getattr(data, "cloze_text", None)
         if not text:
             return False, "`cloze_text` missing"
@@ -116,11 +116,10 @@ class DragTextRuleBased(BaseRuleRubric[ClozeTest]):
         if not is_even:
             return False, "`cloze_text` has an uneven number of `*`"
         too_long = bool(self._cloze_stats(data)["has_too_long_blanks"])
+        if too_long:
+            return False,"`cloze_text` has too long blanked words"
         return (
-            not too_long,
-            "`cloze_text` has too long blanked words"
-            if too_long
-            else "`cloze_text` has appropriate long blanked words",
+            True,"`cloze_text` has appropriate long blanked words"
         )
 
 def has_too_long_blanks(text: str) -> bool:

@@ -1,3 +1,5 @@
+import math
+import re
 from typing import Any
 import dspy
 
@@ -13,31 +15,49 @@ class Evaluation(dspy.Prediction):
     def __repr__(self):
         return self.get_assessment()
 
-    def get_assessment(self, exclude_positive_feedback: bool = False, md_header_level:int=1):
+    def get_assessment(
+        self,
+        exclude_positive_feedback: bool = False,
+        md_header_level: int = 1,
+        rule_based_as_penalty: bool = False,
+        prefix: str = "[### EVALUATION ###]\n",
+        suffix: str = "[### EVALUATION END ###]"
+    ):
         return (
-            f"Total Score: {self._compute_overall_score():.4f}\n---\nFeedback:\n"
-            f"{self._combine_feedback_markdown(exclude_positive_feedback,md_header_level)}"
+            prefix +
+            f"Total Score: {self._compute_overall_score(rule_based_as_penalty=rule_based_as_penalty):.4f}\n---\nDetails:\n"
+            f"{self._combine_feedback_markdown(exclude_positive_feedback, md_header_level)}\n"
+            + suffix
         )
 
-    def get_assessment_dict(self, exclude_positive_feedback: bool = False):
+    def get_assessment_dict(self, exclude_positive_feedback: bool = False, flatten: bool = False, normalize: bool = False):
         serialized = self._to_plain_dict(
-            self.results, exclude_positive_feedback=exclude_positive_feedback
+            self.results, exclude_positive_feedback=exclude_positive_feedback, normalize=False
         )
+        if flatten:
+            return self._flatten_metrics(serialized)
         if isinstance(serialized, dict):
             return serialized
         return {"results": serialized}
 
-    def get_total_score(self) -> float:
-        return self._compute_overall_score()
+    def get_total_score(self, rule_based_as_penalty: bool = False) -> float:
+        return self._compute_overall_score(rule_based_as_penalty=rule_based_as_penalty)
 
-    def _compute_overall_score(self) -> float:
-        scores = [self._score_to_numeric(
-            a) for a in self._iter_assessments(self.results)]
+    def _compute_overall_score(self, rule_based_as_penalty: bool = False) -> float:
+        scores: list[float] = []
+        for metric, assessment in self._iter_assessments(self.results):
+            if (
+                rule_based_as_penalty
+                and getattr(metric, "metric_type", None) == "rule_based"
+                and not self._is_negative_assessment(assessment)
+            ):
+                continue
+            scores.append(self._score_to_numeric(assessment))
         if not scores:
             return 0.0
         return sum(scores) / len(scores)
 
-    def _combine_feedback_markdown(self, exclude_positive_feedback: bool = False,md_header_level=1) -> str:
+    def _combine_feedback_markdown(self, exclude_positive_feedback: bool = False, md_header_level=1) -> str:
         sections = self._build_markdown_sections(
             data=self.results,
             heading_level=md_header_level,
@@ -45,10 +65,10 @@ class Evaluation(dspy.Prediction):
         )
         return "\n\n".join(s for s in sections if s.strip())
 
-    def get_feedback(self, exclude_positive_feedback: bool = False, json_formatted: bool = False, md_header_level:int=1) -> str:
+    def get_feedback(self, exclude_positive_feedback: bool = False, json_formatted: bool = False, md_header_level: int = 1) -> str:
         if json_formatted:
             return str(self.results.__dict__)
-        return self._combine_feedback_markdown(exclude_positive_feedback=exclude_positive_feedback,md_header_level=md_header_level)
+        return self._combine_feedback_markdown(exclude_positive_feedback=exclude_positive_feedback, md_header_level=md_header_level)
 
     def _iter_assessments(self, data: Any):
         if isinstance(data, BaseRubric):
@@ -65,7 +85,45 @@ class Evaluation(dspy.Prediction):
                 if not value.criterion:
                     desc = metric.__class__.model_fields.get(key)
                     value.criterion = desc.description if desc else key
-                yield value
+                yield metric, value
+
+
+    def _sanitize_metric_key(self, key: str) -> str:
+        key = re.sub(r"[^a-zA-Z0-9_./ -]", "_", key).strip()
+        return key[:240] if key else "judge.metric"
+    
+    def _flatten_metrics(self, payload, prefix="judge"):
+        metrics = {}
+
+        def visit(node, path):
+            if isinstance(node, (int, float, bool)):
+                if path.endswith(".score"):
+                    val = float(node)
+                    if math.isfinite(val):
+                        metrics[path] = val
+                return
+
+            if isinstance(node, str):
+                # Parse score-like strings while ignoring criterion/feedback text
+                if path.endswith(".score"):
+                    metrics[path] = node
+                return
+
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    key = self._sanitize_metric_key(str(k))
+                    _path = f"{path}.{key}" if path else key
+                    visit(v, _path)
+                return
+
+            if isinstance(node, (list, tuple)):
+                for i, v in enumerate(node):
+                    _path = f"{path}.{i}" if path else i
+                    visit(v, _path)
+
+        visit(payload, prefix)
+        return metrics
+
 
     def _build_markdown_sections(
         self,
@@ -84,14 +142,14 @@ class Evaluation(dspy.Prediction):
         sections: list[str] = []
         for key, value in data.items():
             if isinstance(value, (dict, BaseRubric)):
-                sections.append(f"{'#' * min(heading_level, 6)} {key}")
-                sections.extend(
-                    self._build_markdown_sections(
-                        data=value,
-                        heading_level=heading_level + 1,
-                        exclude_positive_feedback=exclude_positive_feedback,
-                    )
+                child_sections = self._build_markdown_sections(
+                    data=value,
+                    heading_level=heading_level + 1,
+                    exclude_positive_feedback=exclude_positive_feedback,
                 )
+                if child_sections:
+                    sections.append(f"{'#' * min(heading_level, 6)} {key}")
+                    sections.extend(child_sections)
         return sections
 
     def _metric_table_markdown(self, metric: BaseRubric, exclude_positive_feedback: bool) -> str:
@@ -116,6 +174,8 @@ class Evaluation(dspy.Prediction):
             )
 
         if not rows:
+            if exclude_positive_feedback:
+                return ""
             return "_No feedback entries._"
 
         headers = ("Criterion", "Score", "Scale", "Feedback")
@@ -150,6 +210,28 @@ class Evaluation(dspy.Prediction):
 
         return False
 
+    def _is_negative_assessment(self, assessment: BaseMetricType) -> bool:
+        score = assessment.score
+        min_value = getattr(assessment, "min", None)
+
+        if isinstance(score, str):
+            lowered = score.lower()
+            if lowered == "no":
+                return True
+            if lowered == "yes":
+                return False
+            if isinstance(min_value, str):
+                return lowered == min_value.lower()
+            return False
+
+        if isinstance(score, (int, float)):
+            numeric_min = self._to_float(min_value)
+            if numeric_min is None:
+                return False
+            return float(score) <= numeric_min
+
+        return False
+
     def _score_to_numeric(self, assessment: BaseMetricType) -> float:
         score = assessment.score
 
@@ -181,17 +263,37 @@ class Evaluation(dspy.Prediction):
     def _escape_md(value: str) -> str:
         return value.replace("|", "\\|").replace("\n", "<br>")
 
-    def _to_plain_dict(self, value: Any, exclude_positive_feedback: bool) -> Any:
+    def _normalize(self, value: BaseMetricType):
+        base = {
+            "max": 1,
+            "min": 0,
+        }
+        if isinstance(value.score, str):
+            return {
+                **base,
+                "score": 1 if value.score == value.max else 0,
+            }
+        if isinstance(value.score, (int, float)):
+            return {
+                **base,
+                "score": (value.score - value.min) / (value.max-value.min)
+            }
+        else:
+            raise ValueError("no correct value of `score`")
+
+    def _to_plain_dict(self, value: Any, exclude_positive_feedback: bool, normalize: bool = False) -> Any:
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
 
         if isinstance(value, BaseMetricType):
             if exclude_positive_feedback and self._is_positive_assessment(value):
                 return None
-            return {
-                "score": f"`{value.score}` of `{getattr(value, "scale", None)}`",
-                "feedback": value.feedback,
-            }
+            if normalize:
+                return {
+                    **self._normalize(value),
+                    "feedback": value.feedback,
+                }
+            return value.model_dump()
 
         if isinstance(value, BaseRubric):
             out: dict[str, Any] = {}

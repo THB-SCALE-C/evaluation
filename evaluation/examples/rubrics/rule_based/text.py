@@ -47,3 +47,27 @@ class TextRuleBased(BaseRuleRubric[Text]):
             not has_h1,
             "`text` contains `<h1>` HTML" if has_h1 else "`text` has no `<h1>` HTML",
         )
+    
+    def check_text_has_basic_structure_for_long_content(self, data: Text) -> Tuple[bool, str]:
+        text = getattr(data, "text", None)
+        if text is None:
+            return False, "`text` missing"
+
+        stripped = text.strip()
+        if not stripped:
+            return False, "`text` is empty"
+
+        is_long_text = len(stripped) >= 400
+        has_double_break = "\n\n" in stripped or "\r\n\r\n" in stripped
+        has_bullets = bool(re.search(r"(^|\n)\s*([-*•]\s+|\d+\.\s+)", stripped))
+        has_formatting_html = bool(
+            re.search(r"</?\s*(ul|ol|li|p|br|div|section|article)\b[^>]*>", stripped, flags=re.IGNORECASE)
+        )
+
+        is_unformatted_long_text = is_long_text and not (has_double_break or has_bullets or has_formatting_html)
+        return (
+            not is_unformatted_long_text,
+            "`text` appears to be a long unformatted block"
+            if is_unformatted_long_text
+            else "`text` has acceptable structure",
+        )
