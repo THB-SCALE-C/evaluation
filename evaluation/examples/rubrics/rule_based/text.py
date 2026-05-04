@@ -1,7 +1,7 @@
 from typing import ClassVar, Tuple
 import re
 
-from creator.dspy_components import Text
+from creator.schemas.simple import Text
 from evaluation.rubrics import BaseRuleRubric
 
 class TextRuleBased(BaseRuleRubric[Text]):

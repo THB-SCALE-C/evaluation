@@ -1,6 +1,6 @@
 from typing import ClassVar, Tuple
 
-from creator.dspy_components import SingleChoice
+from creator.schemas.simple import SingleChoice
 from evaluation.rubrics import BaseRuleRubric
 
 
@@ -108,7 +108,7 @@ class SingleChoiceRuleBased(BaseRuleRubric[SingleChoice]):
         return True, "all `questions` have `correct_answer`"
     
     def check_correct_answers_not_longest(self, data: SingleChoice) -> Tuple[bool, str]:
-        for q in data.questions:
+        for q in data.question_items:
             if any(len(w)<len(q.correct_answer) for w in q.wrong_answers):
                 return False, f"At least one question has a correct answer that is longer than any other wrong answer."
         return True, "all `correct_answers` are shorter than any wrong answer."

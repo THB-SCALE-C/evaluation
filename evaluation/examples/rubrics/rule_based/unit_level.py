@@ -1,16 +1,16 @@
 from typing import ClassVar, Tuple
 import re
 
-from creator.dspy_components import Text, ClozeTest, SingleChoice
+from creator.schemas.simple import Text, DragText, SingleChoice
 from evaluation.rubrics import BaseRuleRubric
 
 
-class UnitConsistency(BaseRuleRubric[list[Text | ClozeTest | SingleChoice]]):
+class UnitConsistency(BaseRuleRubric[list[Text | DragText | SingleChoice]]):
     metric_name: ClassVar = "unit_consistency"
     metric_type: ClassVar = "rule_based"
     required_slide_type: ClassVar = None
 
-    def check_quantity_slides(self, data: list[Text | ClozeTest | SingleChoice]) -> Tuple[bool, str]:
+    def check_quantity_slides(self, data: list[Text | DragText | SingleChoice]) -> Tuple[bool, str]:
         slides_len = len(data)
 
         if slides_len<5:
@@ -19,7 +19,7 @@ class UnitConsistency(BaseRuleRubric[list[Text | ClozeTest | SingleChoice]]):
             return False, "too many slides for micro-learning."
         return True, f"Having {slides_len} slides, the unit has an accepted amount of slides."
 
-    def check_activity_proportionality(self, data: list[Text | ClozeTest | SingleChoice]) -> Tuple[bool, str]:
+    def check_activity_proportionality(self, data: list[Text | DragText | SingleChoice]) -> Tuple[bool, str]:
         slides_len = len(data)
         text_amount = len([s for s in data if s.slide_type == "text"])
         activity_amount = slides_len - text_amount

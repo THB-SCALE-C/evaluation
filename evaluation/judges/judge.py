@@ -4,7 +4,7 @@ from evaluation.rubrics import BaseRubric
 from evaluation.rubrics import BaseRuleRubric
 from evaluation.signatures.judgement import Judgement
 from .evaluation import Evaluation
-from creator.dspy_components.__base__ import BaseComponent
+from creator.schemas.base import BaseComponent
 
 
 class Judge(dspy.Module):

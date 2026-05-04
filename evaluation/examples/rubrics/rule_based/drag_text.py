@@ -1,13 +1,13 @@
 from typing import ClassVar, Tuple
 from evaluation.rubrics import BaseRuleRubric
-from creator.dspy_components import ClozeTest
+from creator.schemas.simple import DragText
 
-class DragTextRuleBased(BaseRuleRubric[ClozeTest]):
+class DragTextRuleBased(BaseRuleRubric[DragText]):
     metric_name:ClassVar = "drag_text"
     metric_type:ClassVar = "rule_based"
     required_slide_type:ClassVar = "drag_text"
 
-    def _cloze_stats(self, data: ClozeTest) -> dict[str, int | float | bool]:
+    def _cloze_stats(self, data: DragText) -> dict[str, int | float | bool]:
         text = getattr(data, "cloze_text", None)
         cached = getattr(self, "_cached_cloze_stats", None)
         if cached and cached[0] == text:
@@ -28,36 +28,36 @@ class DragTextRuleBased(BaseRuleRubric[ClozeTest]):
         self._cached_cloze_stats = (text, stats)
         return stats
 
-    def check_has_user_instructions(self, data: ClozeTest) -> Tuple[bool, str]:
+    def check_has_user_instructions(self, data: DragText) -> Tuple[bool, str]:
         has_user_instruction = bool(getattr(data, "user_instruction", "").strip())
         return (
             has_user_instruction,
             "`user_instruction` present" if has_user_instruction else "`user_instruction` missing",
         )
 
-    def check_has_cloze_text(self, data: ClozeTest) -> Tuple[bool, str]:
+    def check_has_cloze_text(self, data: DragText) -> Tuple[bool, str]:
         has_text = bool(getattr(data, "cloze_text", None))
         return has_text, "`cloze_text` present" if has_text else "`cloze_text` missing"
 
-    def check_has_slide_title(self, data: ClozeTest) -> Tuple[bool, str]:
+    def check_has_slide_title(self, data: DragText) -> Tuple[bool, str]:
         has_title = bool(getattr(data, "title", None))
         return has_title, "`title` present" if has_title else "`title` missing"
 
-    def check_appropriate_title_length(self, data: ClozeTest) -> Tuple[bool, str]:
+    def check_appropriate_title_length(self, data: DragText) -> Tuple[bool, str]:
         title = getattr(data, "title", None)
         if not title:
             return False, "`title` missing"
         title_too_long = len(title) > 50
         return (not title_too_long), f"`title` has {'not' if title_too_long else ''} appropriate length"
 
-    def check_valid_word_count(self, data: ClozeTest) -> Tuple[bool, str]:
+    def check_valid_word_count(self, data: DragText) -> Tuple[bool, str]:
         text = getattr(data, "cloze_text", None)
         if not text:
             return False, "`cloze_text` missing"
         is_even = bool(self._cloze_stats(data)["is_even"])
         return is_even, f"`cloze_text` has an {'even' if is_even else 'uneven'} number of `*`"
 
-    def check_correct_blank_distance(self, data: ClozeTest) -> Tuple[bool, str]:
+    def check_correct_blank_distance(self, data: DragText) -> Tuple[bool, str]:
         text = getattr(data, "cloze_text", None)
         if not text:
             return False, "`cloze_text` missing"
@@ -69,7 +69,7 @@ class DragTextRuleBased(BaseRuleRubric[ClozeTest]):
             else "`cloze_text` has no adjacent blanks",
         )
 
-    def check_cloze_text_appropriate_length(self, data: ClozeTest) -> Tuple[bool, str]:
+    def check_cloze_text_appropriate_length(self, data: DragText) -> Tuple[bool, str]:
         text = getattr(data, "cloze_text", None)
         if not text:
             return False, "`cloze_text` missing"
@@ -82,7 +82,7 @@ class DragTextRuleBased(BaseRuleRubric[ClozeTest]):
             else "`cloze_text` has appropriate length",
         )
 
-    def check_has_no_double_linebreaks(self, data: ClozeTest) -> Tuple[bool, str]:
+    def check_has_no_double_linebreaks(self, data: DragText) -> Tuple[bool, str]:
         text = getattr(data, "cloze_text", None)
         if not text:
             return False, "`cloze_text` missing"
@@ -94,7 +94,7 @@ class DragTextRuleBased(BaseRuleRubric[ClozeTest]):
             else "`cloze_text` has not double linebreaks",
         )
 
-    def check_blank_count(self, data: ClozeTest) -> Tuple[bool, str]:
+    def check_blank_count(self, data: DragText) -> Tuple[bool, str]:
         text = getattr(data, "cloze_text", None)
         if not text:
             return False, "`cloze_text` missing"
@@ -108,7 +108,7 @@ class DragTextRuleBased(BaseRuleRubric[ClozeTest]):
         return True, "`cloze_text` has an appropriate amount of blanked words"
 
 
-    def check_has_not_too_long_blanks(self, data: ClozeTest) -> Tuple[bool, str]:
+    def check_has_not_too_long_blanks(self, data: DragText) -> Tuple[bool, str]:
         text = getattr(data, "cloze_text", None)
         if not text:
             return False, "`cloze_text` missing"
