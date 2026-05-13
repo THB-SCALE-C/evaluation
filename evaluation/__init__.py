@@ -1,7 +1,9 @@
 
 from evaluation.judges.judge import Judge
+from evaluation.judges.evaluation import Evaluation
 from . import rubrics
 from . import examples
 from evaluation import types
 
-__all__ = ["Judge", "rubrics", "examples", "types"]
+
+__all__ = ["Judge", "rubrics", "examples", "types", "Evaluation"]

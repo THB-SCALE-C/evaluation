@@ -3,6 +3,7 @@ from typing import Any, ClassVar, List, Mapping, Tuple, TypeAlias, cast, get_ori
 import dspy
 from evaluation.rubrics import BaseRubric
 from evaluation.rubrics import BaseRuleRubric
+from evaluation.types.assessment_types import BaseMetricType
 from evaluation.signatures.judgement import Judgement
 from .evaluation import Evaluation
 from creator.schemas.base import BaseComponent
@@ -196,12 +197,24 @@ class Judge(dspy.Module):
                     metric_results.append(metric_result)
 
         for metric_result in metric_results:
+            self._set_metric_criteria_from_field_names(metric_result)
             if not metric_result.required_slide_type:
                 processed_results.setdefault("unit_level", {}).setdefault(
                     metric_result.metric_type, {}).setdefault(metric_result.metric_name, metric_result)
             else:
                 processed_results.setdefault("slide_level", {}).setdefault(
                     f"slide-{metric_result.index_}-{metric_result.metric_type}", {}).setdefault(metric_result.metric_name, metric_result)
+
+    def _set_metric_criteria_from_field_names(self, metric_result: BaseRubric) -> None:
+        """Force criterion labels to use rubric field names (`_` -> space)."""
+        for field_name in metric_result.__class__.model_fields:
+            field_value = getattr(metric_result, field_name, None)
+            if isinstance(field_value, BaseMetricType):
+                field_value.criterion = self._format_criterion_key(field_name)
+
+    @staticmethod
+    def _format_criterion_key(key: str) -> str:
+        return key.replace("_", " ").strip()
 
     def _restore_metrics_from_signature(self, result: dspy.Prediction,
                                         metric_name: str | None = None) -> list[BaseRubric]:
