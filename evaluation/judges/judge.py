@@ -54,7 +54,8 @@ class Judge(dspy.Module):
         self.judge = None
         self.judges_by_metric: dict[str, dspy.Module] = {}
         self._flattened_metric_map: FlattenedMetricMap = {}
-        self._flattened_metric_maps_by_metric: dict[str, FlattenedMetricMap] = {}
+        self._flattened_metric_maps_by_metric: dict[str, FlattenedMetricMap] = {
+        }
 
         # Build either a single multi-metric LLM judge or one judge per LLM metric.
         self._initialize_llm_judges()
@@ -82,6 +83,15 @@ class Judge(dspy.Module):
         self._run_rule_based_metrics(slides, results)
         return Evaluation(results)
 
+    # def dspy_evaluate(self, gold: dspy.Example, pred: dspy.Prediction, trace=None, pred_name=None, pred_trace=None) -> dspy.Prediction:
+    #     if not pred.slides:
+    #         return dspy.Prediction(score=0, feedback="No `slides` found.")
+    #     evaluation = self(list(pred.slides))
+    #     total_score = evaluation.get_total_score()
+    #     overall_feedback = evaluation.get_feedback(
+    #         md_header_level=3, exclude_positive_feedback=True)
+    #     return dspy.Prediction(score=total_score, feedback=overall_feedback)
+
     def __call__(self, slides: List, *args,  **context: dict[str, Any]) -> Evaluation:
         return super().__call__(slides, *args, **context)  # type:ignore
 
@@ -101,14 +111,16 @@ class Judge(dspy.Module):
             llm_metric = cast(type[BaseRubric], metric)
             self._rubric_models_by_name[llm_metric.metric_name] = llm_metric
             self.judge_metrics.append(
-                (llm_metric.metric_name, dspy.OutputField(desc=llm_metric.__doc__), llm_metric)
+                (llm_metric.metric_name, dspy.OutputField(
+                    desc=llm_metric.__doc__), llm_metric)
             )
 
     def _initialize_llm_judges(self) -> None:
         if not self.judge_metrics:
             return
         if self.llm is None:
-            raise ValueError("`llm` is required when at least one LLM-judge metric is configured.")
+            raise ValueError(
+                "`llm` is required when at least one LLM-judge metric is configured.")
 
         if self.one_call_per_metric:
             for metric_name, metric_field, metric_rubric in self.judge_metrics:
@@ -120,10 +132,12 @@ class Judge(dspy.Module):
                     )
                     self._flattened_metric_maps_by_metric[metric_name] = flattened_map
                 else:
-                    signature = signature.append(metric_name, metric_field, metric_rubric)
+                    signature = signature.append(
+                        metric_name, metric_field, metric_rubric)
 
                 signature = self._with_base_instructions(signature)
-                self.judges_by_metric[metric_name] = self._build_predictor(signature)
+                self.judges_by_metric[metric_name] = self._build_predictor(
+                    signature)
             return
 
         signature = self.judgement
@@ -146,7 +160,8 @@ class Judge(dspy.Module):
         return signature
 
     def _build_predictor(self, signature):
-        predictor = dspy.ChainOfThought(signature) if self.cot else dspy.Predict(signature)
+        predictor = dspy.ChainOfThought(
+            signature) if self.cot else dspy.Predict(signature)
         predictor.set_lm(self.llm)  # type:ignore[arg-type]
         return predictor
 
@@ -156,7 +171,8 @@ class Judge(dspy.Module):
             # Independent per-metric calls allow metric-specific prompts/signatures.
             for metric_name, metric_judge in self.judges_by_metric.items():
                 prediction = metric_judge(slides=slide_payload, **context)
-                self._merge_llm_prediction(prediction, results, metric_name=metric_name)
+                self._merge_llm_prediction(
+                    prediction, results, metric_name=metric_name)
             return
 
         if self.judge and self.judge_metrics:
@@ -172,7 +188,8 @@ class Judge(dspy.Module):
             ]
             predictions = await asyncio.gather(*tasks, return_exceptions=False)
             for (metric_name, _), prediction in zip(self.judges_by_metric.items(), predictions):
-                self._merge_llm_prediction(prediction, results, metric_name=metric_name)
+                self._merge_llm_prediction(
+                    prediction, results, metric_name=metric_name)
             return
 
         self._run_llm_judges(slide_payload, context, results)
@@ -188,7 +205,8 @@ class Judge(dspy.Module):
                               metric_name: str | None = None) -> None:
         if self.reduce_to_signature_level:
             # Convert flattened primitive outputs back into rubric model instances.
-            metric_results = self._restore_metrics_from_signature(result, metric_name)
+            metric_results = self._restore_metrics_from_signature(
+                result, metric_name)
         else:
             metric_results = []
             for key in result.toDict():
@@ -222,7 +240,8 @@ class Judge(dspy.Module):
         metric_map = self._flattened_metric_map
         if metric_name:
             # In per-metric mode, each judge has its own flattened field map.
-            metric_map = self._flattened_metric_maps_by_metric.get(metric_name, {})
+            metric_map = self._flattened_metric_maps_by_metric.get(
+                metric_name, {})
         for output_name, value in result.toDict().items():
             mapped = metric_map.get(output_name)
             if not mapped:

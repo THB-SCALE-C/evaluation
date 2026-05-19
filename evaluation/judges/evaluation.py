@@ -1,7 +1,7 @@
 import json
 import math
 import re
-from typing import Any
+from typing import Any, Iterable
 
 import dspy
 
@@ -97,13 +97,21 @@ class Evaluation(dspy.Prediction):
         rule_based_as_penalty: bool = False,
         prefix: str = "[### EVALUATION ###]\n",
         suffix: str = "[### EVALUATION END ###]",
-        flattened: bool = False,
+        flatten: bool = False,
+        exclude_headers: Iterable[str] | None = None,
     ) -> str:
         """Render the full assessment text with score and detailed feedback."""
         details = (
-            self._render_markdown_feedback_flat(exclude_positive_feedback)
-            if flattened
-            else self._render_markdown_feedback_tree(exclude_positive_feedback, md_header_level)
+            self._render_markdown_feedback_flat(
+                exclude_positive_feedback=exclude_positive_feedback,
+                exclude_headers=exclude_headers,
+            )
+            if flatten
+            else self._render_markdown_feedback_tree(
+                exclude_positive_feedback=exclude_positive_feedback,
+                md_header_level=md_header_level,
+                exclude_headers=exclude_headers,
+            )
         )
         total_score = self._compute_overall_score(rule_based_as_penalty=rule_based_as_penalty)
         return prefix + f"Total Score: {total_score:.4f}\n---\nDetails:\n{details}\n" + suffix
@@ -170,16 +178,26 @@ class Evaluation(dspy.Prediction):
             scores.append(self._score_to_numeric(assessment))
         return sum(scores) / len(scores) if scores else 0.0
 
-    def _render_markdown_feedback_tree(self, exclude_positive_feedback: bool = False, md_header_level: int = 1) -> str:
+    def _render_markdown_feedback_tree(
+        self,
+        exclude_positive_feedback: bool = False,
+        md_header_level: int = 1,
+        exclude_headers: Iterable[str] | None = None,
+    ) -> str:
         """Render hierarchical markdown feedback grouped by nested result keys."""
         sections = self._build_markdown_sections(
             data=self.results,
             heading_level=md_header_level,
             exclude_positive_feedback=exclude_positive_feedback,
+            exclude_headers=exclude_headers,
         )
         return "\n".join(section for section in sections if section.strip())
 
-    def _render_markdown_feedback_flat(self, exclude_positive_feedback: bool = False) -> str:
+    def _render_markdown_feedback_flat(
+        self,
+        exclude_positive_feedback: bool = False,
+        exclude_headers: Iterable[str] | None = None,
+    ) -> str:
         """Render one flat markdown table across all assessments."""
         serialized = self.to_dict(
             exclude_positive_feedback=exclude_positive_feedback,
@@ -187,10 +205,10 @@ class Evaluation(dspy.Prediction):
             normalize=False,
         )
         rows = [
-            self._build_markdown_row(path, assessment)
+            self._build_markdown_row(path, assessment, exclude_headers=exclude_headers)
             for path, assessment in self._iter_serialized_assessments(serialized)
         ]
-        return self._render_feedback_rows(rows, exclude_positive_feedback)
+        return self._render_feedback_rows(rows, exclude_positive_feedback, exclude_headers=exclude_headers)
 
     def _iter_assessments(self, data: Any):
         """Yield `(metric, assessment)` pairs from nested result structures."""
@@ -240,14 +258,20 @@ class Evaluation(dspy.Prediction):
         visit(payload, prefix)
         return flattened
 
-    def _build_markdown_sections(self, data: Any, heading_level: int, exclude_positive_feedback: bool) -> list[str]:
+    def _build_markdown_sections(
+        self,
+        data: Any,
+        heading_level: int,
+        exclude_positive_feedback: bool,
+        exclude_headers: Iterable[str] | None = None,
+    ) -> list[str]:
         """Build hierarchical markdown sections for the nested result tree."""
         if isinstance(data, BaseRubric):
-            return [self._render_feedback_rows(self._rows_from_metric(data, exclude_positive_feedback), exclude_positive_feedback)]
+            return [self._render_feedback_rows(self._rows_from_metric(data, exclude_positive_feedback), exclude_positive_feedback, exclude_headers=exclude_headers)]
         if self._is_metric_assessment_map(data):
-            return [self._render_feedback_rows(self._rows_from_assessment_map(data, exclude_positive_feedback), exclude_positive_feedback)]
+            return [self._render_feedback_rows(self._rows_from_assessment_map(data, exclude_positive_feedback), exclude_positive_feedback, exclude_headers=exclude_headers)]
         if self._is_assessment_dict(data):
-            return [self._render_feedback_rows(self._rows_from_assessment_map({"": data}, exclude_positive_feedback), exclude_positive_feedback)]
+            return [self._render_feedback_rows(self._rows_from_assessment_map({"": data}, exclude_positive_feedback), exclude_positive_feedback, exclude_headers=exclude_headers)]
         if not isinstance(data, dict):
             return []
 
@@ -259,6 +283,7 @@ class Evaluation(dspy.Prediction):
                 data=value,
                 heading_level=heading_level + 1,
                 exclude_positive_feedback=exclude_positive_feedback,
+                exclude_headers=exclude_headers,
             )
             child_sections = [section for section in child_sections if section]
             if child_sections:
@@ -307,19 +332,34 @@ class Evaluation(dspy.Prediction):
             )
         return rows
 
-    def _render_feedback_rows(self, rows: list[dict[str, Any]], exclude_positive_feedback: bool) -> str:
+    def _render_feedback_rows(
+        self,
+        rows: list[dict[str, Any]],
+        exclude_positive_feedback: bool,
+        exclude_headers: Iterable[str] | None = None,
+    ) -> str:
         """Render rows to markdown or return empty placeholder text."""
         if not rows:
             return "" if exclude_positive_feedback else "_No feedback entries._"
-        return self._render_markdown_table(rows)
+        return self._render_markdown_table(rows, exclude_headers=exclude_headers)
 
-    def _render_markdown_table(self, rows: list[dict[str, Any]]) -> str:
+    def _render_markdown_table(self, rows: list[dict[str, Any]], exclude_headers: Iterable[str] | None = None) -> str:
         """Render rows into a fixed-column markdown table."""
+        excluded = {header.lower() for header in exclude_headers} if exclude_headers is not None else set()
+        included_columns: list[tuple[str, str]] = [
+            (column, header)
+            for column, header in zip(self.TABLE_COLUMNS, self.TABLE_HEADERS)
+            if header.lower() not in excluded and column.lower() not in excluded
+        ]
+        if not included_columns:
+            return "" if rows else "_No feedback entries._"
+
         escaped_rows = [
-            tuple(self._escape_md(row.get(column, "")) for column in self.TABLE_COLUMNS)
+            tuple(self._escape_md(row.get(column, "")) for column, _ in included_columns)
             for row in rows
         ]
-        widths = [len(header) for header in self.TABLE_HEADERS]
+        headers = tuple(header for _, header in included_columns)
+        widths = [len(header) for header in headers]
         for row in escaped_rows:
             for idx, cell in enumerate(row):
                 widths[idx] = max(widths[idx], len(cell))
@@ -327,7 +367,7 @@ class Evaluation(dspy.Prediction):
         def format_row(values: tuple[str, ...]) -> str:
             return "| " + " | ".join(value.ljust(widths[idx]) for idx, value in enumerate(values)) + " |"
 
-        header = format_row(self.TABLE_HEADERS)
+        header = format_row(headers)
         separator = "|" + "|".join("-" * (width + 2) for width in widths) + "|"
         return "\n".join([header, separator, *(format_row(row) for row in escaped_rows)])
 
@@ -353,9 +393,14 @@ class Evaluation(dspy.Prediction):
                 row[key] = value
         return row
 
-    def _build_markdown_row(self, path: tuple[str, ...], assessment: dict[str, Any]) -> dict[str, Any]:
+    def _build_markdown_row(
+        self,
+        path: tuple[str, ...],
+        assessment: dict[str, Any],
+        exclude_headers: Iterable[str] | None = None,
+    ) -> dict[str, Any]:
         """Build one markdown-table row from an assessment leaf and its path."""
-        return {
+        row = {
             "criterion": assessment.get("criterion") or self._format_criterion_key(path[-1] if path else ""),
             "score": assessment.get("score", ""),
             "feedback": assessment.get("feedback", ""),
@@ -363,6 +408,10 @@ class Evaluation(dspy.Prediction):
             "description": assessment.get("description", ""),
             "path": ".".join(path[:-1]) if path else "",
         }
+        if exclude_headers is None:
+            return row
+        excluded = {header.lower() for header in exclude_headers}
+        return {key: value for key, value in row.items() if key.lower() not in excluded}
 
     def _iter_serialized_assessments(self, node: Any, path: tuple[str, ...] = ()):
         """Yield assessment leaves from serialized dict/list structures."""
