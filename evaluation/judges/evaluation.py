@@ -116,30 +116,34 @@ class Evaluation(dspy.Prediction):
         total_score = self._compute_overall_score(rule_based_as_penalty=rule_based_as_penalty)
         return prefix + f"Total Score: {total_score:.4f}\n---\nDetails:\n{details}\n" + suffix
 
-    def to_dict(self, exclude_positive_feedback: bool = False, flatten: bool = False, normalize: bool = False):
-        """Serialize results to a plain dict, optionally flattened and normalized."""
+    def to_dict(self, exclude_positive_feedback: bool = False, normalize: bool = False):
+        """Serialize results to a criterion-keyed dict with row-like assessment payloads."""
         serialized = self._serialize_to_plain_dict(
             self.results,
             exclude_positive_feedback=exclude_positive_feedback,
             normalize=normalize,
         )
-        if flatten:
-            return self._flatten_scores(serialized, prefix="")
-        return serialized if isinstance(serialized, dict) else {"results": serialized}
+        if not isinstance(serialized, dict):
+            return {}
+
+        out: dict[str, dict[str, Any]] = {}
+        for path, assessment in self._iter_serialized_assessments(serialized):
+            row = self._build_dataframe_row(path, assessment)
+            criterion = str(row.get("criterion") or self._format_criterion_key(path[-1] if path else ""))
+            payload = dict(row)
+            payload.pop("criterion", None)
+            out[criterion] = payload
+        return out
 
     def to_dataframe(self, exclude_positive_feedback: bool = False, normalize: bool = False):
         """Convert results to a flat pandas dataframe."""
         pd = self._require_pandas("to_dataframe")
         serialized = self.to_dict(
             exclude_positive_feedback=exclude_positive_feedback,
-            flatten=False,
             normalize=normalize,
         )
 
-        rows: list[dict[str, Any]] = [
-            self._build_dataframe_row(path, assessment)
-            for path, assessment in self._iter_serialized_assessments(serialized)
-        ]
+        rows: list[dict[str, Any]] = [{"criterion": criterion, **assessment} for criterion, assessment in serialized.items()]
         if not rows:
             return pd.DataFrame(columns=self.DATAFRAME_PRIORITY_COLUMNS)
 
@@ -160,7 +164,7 @@ class Evaluation(dspy.Prediction):
     def get_feedback(self, exclude_positive_feedback: bool = False, json_formatted: bool = False, md_header_level: int = 1) -> str:
         """Render feedback in markdown or JSON format."""
         if json_formatted:
-            payload = self.to_dict(exclude_positive_feedback=exclude_positive_feedback, flatten=False)
+            payload = self.to_dict(exclude_positive_feedback=exclude_positive_feedback)
             return json.dumps(payload, ensure_ascii=False, indent=2)
         return self._render_markdown_feedback_tree(
             exclude_positive_feedback=exclude_positive_feedback,
@@ -201,13 +205,22 @@ class Evaluation(dspy.Prediction):
         """Render one flat markdown table across all assessments."""
         serialized = self.to_dict(
             exclude_positive_feedback=exclude_positive_feedback,
-            flatten=False,
             normalize=False,
         )
-        rows = [
-            self._build_markdown_row(path, assessment, exclude_headers=exclude_headers)
-            for path, assessment in self._iter_serialized_assessments(serialized)
-        ]
+        rows = []
+        for criterion, assessment in serialized.items():
+            row = {
+                "criterion": criterion,
+                "score": assessment.get("score", ""),
+                "feedback": assessment.get("feedback", ""),
+                "scale": assessment.get("scale", ""),
+                "description": assessment.get("description", ""),
+                "path": assessment.get("path", ""),
+            }
+            if exclude_headers is not None:
+                excluded = {header.lower() for header in exclude_headers}
+                row = {key: value for key, value in row.items() if key.lower() not in excluded}
+            rows.append(row)
         return self._render_feedback_rows(rows, exclude_positive_feedback, exclude_headers=exclude_headers)
 
     def _iter_assessments(self, data: Any):
