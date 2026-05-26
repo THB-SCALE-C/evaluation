@@ -36,6 +36,7 @@ class Judge(dspy.Module):
                  reduce_to_signature_level: bool = False,
                  one_call_per_metric: bool = False,
                  async_calls: bool = True,
+                 omit_signature_prefix: bool = False,
                  **context: Tuple[str, type]):
         super().__init__()
         self.metrics = metrics
@@ -45,6 +46,7 @@ class Judge(dspy.Module):
         self.llm = llm
         self.cot = cot
         self.base_instructions = base_instructions
+        self.omit_signature_prefix = omit_signature_prefix
 
         self.judgement = self._build_base_signature(context)
         self.judge_metrics: list[JudgeMetricSpec] = []
@@ -92,8 +94,8 @@ class Judge(dspy.Module):
     #         md_header_level=3, exclude_positive_feedback=True)
     #     return dspy.Prediction(score=total_score, feedback=overall_feedback)
 
-    def __call__(self, slides: List, *args,  **context: dict[str, Any]) -> Evaluation:
-        return super().__call__(slides, *args, **context)  # type:ignore
+    def __call__(self, *args,  **context) -> Evaluation:
+        return super().__call__(*args, **context)  # type:ignore
 
     def _build_base_signature(self, context: Mapping[str, Tuple[str, type]]):
         signature = Judgement
@@ -291,8 +293,16 @@ class Judge(dspy.Module):
                     continue
                 if not field_info.is_required():
                     continue
-                # Prefix with metric name to avoid collisions across rubric models.
-                output_name = f"{metric_name}_{field_name}"
+                output_name = (
+                    field_name
+                    if self.omit_signature_prefix
+                    else f"{metric_name}_{field_name}"
+                )
+                # When prefixes are omitted, duplicate field names can appear across metrics.
+                # Keep one signature field and let the later metric mapping win deterministically.
+                if output_name in flattened_fields:
+                    flattened_fields[output_name] = (metric_name, field_name)
+                    continue
                 signature = signature.append(
                     output_name,
                     dspy.OutputField(
