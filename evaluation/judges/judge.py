@@ -1,43 +1,43 @@
 import asyncio
-from typing import Any, ClassVar, List, Mapping, Tuple, TypeAlias, cast, get_origin
-import dspy
-from evaluation.rubrics import BaseRubric
-from evaluation.rubrics import BaseRuleRubric
-from evaluation.types.assessment_types import BaseMetricType
-from evaluation.signatures.judgement import Judgement
-from .evaluation import Evaluation
-from creator.schemas.base import BaseComponent
+from typing import Any, Mapping, cast
 
-MetricResultMap: TypeAlias = dict[str, dict[str, dict[str, Any]]]
-JudgeMetricSpec: TypeAlias = tuple[str, Any, type[BaseRubric]]
-FlattenedMetricMap: TypeAlias = dict[str, tuple[str, str]]
+import dspy
+from creator.schemas.base import BaseComponent
+from evaluation.lib.judge_utils import (
+    FlattenedMetricMap,
+    JudgeMetricSpec,
+    MetricResultMap,
+    apply_metric_criteria_from_field_names,
+    reduce_signature_to_metric_fields,
+    restore_metrics_from_signature,
+    sort_slide_level_results,
+    store_metric_result,
+)
+from evaluation.rubrics import BaseRubric, BaseRuleRubric
+from evaluation.signatures.judgement import Judgement
+from evaluation.types.assessment_types import BaseMetricType
+
+from .evaluation import Evaluation
 
 
 class Judge(dspy.Module):
-    """Evaluate slides with configured LLM and rule-based rubrics.
+    """Evaluate slides with LLM and rule-based rubrics."""
 
-    Parameters:
-        llm: Optional DSPy language model used for LLM-judge metrics.
-        metrics: Rubric classes to evaluate. LLM rubrics and rule-based rubrics can be mixed.
-        cot: If True, use `dspy.ChainOfThought`; otherwise use `dspy.Predict`.
-        base_instructions: Optional global instructions added to the judging signature.
-        reduce_to_signature_level: If True, flatten rubric output fields into signature-level outputs.
-        one_call_per_metric: If True, initialize one LLM judge per LLM metric. If False,
-            initialize one combined judge for all LLM metrics. If no LLM metrics are configured,
-            no judge is initialized.
-        async_calls: Only relevant when `one_call_per_metric=True` and multiple LLM judges
-            are initialized. If True (default), execute per-metric LLM calls in parallel.
-        **context: Additional input fields appended to the signature as
-            `name=(description, type)`.
-    """
-
-    def __init__(self, llm: dspy.LM | None, metrics: list[type[BaseRubric | BaseRuleRubric]],
-                 cot=False, base_instructions: str | None = None,
-                 reduce_to_signature_level: bool = False,
-                 one_call_per_metric: bool = False,
-                 async_calls: bool = True,
-                 omit_signature_prefix: bool = False,
-                 **context: Tuple[str, type]):
+    # ---------------------------------------------------
+    # Main Functionality
+    # ---------------------------------------------------
+    def __init__(
+        self,
+        llm: dspy.LM | None,
+        metrics: list[type[BaseRubric | BaseRuleRubric]],
+        cot: bool = False,
+        base_instructions: str | None = None,
+        reduce_to_signature_level: bool = False,
+        one_call_per_metric: bool = False,
+        async_calls: bool = True,
+        omit_signature_prefix: bool = False,
+        **context: tuple[str | None, type | None],
+    ):
         super().__init__()
         self.metrics = metrics
         self.reduce_to_signature_level = reduce_to_signature_level
@@ -58,17 +58,14 @@ class Judge(dspy.Module):
         self._flattened_metric_map: FlattenedMetricMap = {}
         self._flattened_metric_maps_by_metric: dict[str, FlattenedMetricMap] = {
         }
-
-        # Build either a single multi-metric LLM judge or one judge per LLM metric.
         self._initialize_llm_judges()
 
-    def forward(self, slides: List[BaseComponent], **context: dict[str, Any]) -> Evaluation:
+    def forward(self, slides: list[BaseComponent], **context: dict[str, Any]) -> Evaluation:
         if self._should_use_parallel_async_calls():
             try:
                 asyncio.get_running_loop()
             except RuntimeError:
                 return asyncio.run(self.aforward(slides, **context))
-            # Fallback when already inside an event loop.
 
         results: MetricResultMap = {}
         slide_payload = [slide.model_dump() for slide in slides]
@@ -77,7 +74,7 @@ class Judge(dspy.Module):
         self._run_rule_based_metrics(slides, results)
         return Evaluation(results)
 
-    async def aforward(self, slides: List[BaseComponent], **context: dict[str, Any]) -> Evaluation:
+    async def aforward(self, slides: list[BaseComponent], **context: dict[str, Any]) -> Evaluation:
         results: MetricResultMap = {}
         slide_payload = [slide.model_dump() for slide in slides]
 
@@ -85,24 +82,17 @@ class Judge(dspy.Module):
         self._run_rule_based_metrics(slides, results)
         return Evaluation(results)
 
-    # def dspy_evaluate(self, gold: dspy.Example, pred: dspy.Prediction, trace=None, pred_name=None, pred_trace=None) -> dspy.Prediction:
-    #     if not pred.slides:
-    #         return dspy.Prediction(score=0, feedback="No `slides` found.")
-    #     evaluation = self(list(pred.slides))
-    #     total_score = evaluation.get_total_score()
-    #     overall_feedback = evaluation.get_feedback(
-    #         md_header_level=3, exclude_positive_feedback=True)
-    #     return dspy.Prediction(score=total_score, feedback=overall_feedback)
+    def __call__(self, *args, **context) -> Evaluation:
+        return super().__call__(*args, **context)  # type: ignore
 
-    def __call__(self, *args,  **context) -> Evaluation:
-        return super().__call__(*args, **context)  # type:ignore
-
-    def _build_base_signature(self, context: Mapping[str, Tuple[str, type]]):
+    # ---------------------------------------------------
+    # Helper Functions
+    # ---------------------------------------------------
+    def _build_base_signature(self, context: Mapping[str, tuple[str | None, type | None]]):
         signature = Judgement
         for key, (desc, value_type) in context.items():
-            # Extend the shared input signature with caller-provided context fields.
             signature = signature.append(
-                key, dspy.InputField(desc=desc), value_type)
+                key, dspy.InputField(desc=desc) if desc else dspy.InputField(), value_type)
         return signature
 
     def _collect_llm_metrics(self) -> None:
@@ -128,9 +118,11 @@ class Judge(dspy.Module):
             for metric_name, metric_field, metric_rubric in self.judge_metrics:
                 signature = self.judgement
                 if self.reduce_to_signature_level:
-                    # Flatten only this metric's rubric fields into primitive signature outputs.
-                    signature, flattened_map = self._reduce_to_signature_level(
-                        signature, [(metric_name, metric_field, metric_rubric)]
+                    signature, flattened_map = reduce_signature_to_metric_fields(
+                        signature=signature,
+                        judge_metrics=[
+                            (metric_name, metric_field, metric_rubric)],
+                        omit_signature_prefix=self.omit_signature_prefix,
                     )
                     self._flattened_metric_maps_by_metric[metric_name] = flattened_map
                 else:
@@ -144,9 +136,10 @@ class Judge(dspy.Module):
 
         signature = self.judgement
         if self.reduce_to_signature_level:
-            # Flatten all rubric fields into one shared signature for a single LLM call.
-            signature, self._flattened_metric_map = self._reduce_to_signature_level(
-                signature, self.judge_metrics
+            signature, self._flattened_metric_map = reduce_signature_to_metric_fields(
+                signature=signature,
+                judge_metrics=self.judge_metrics,
+                omit_signature_prefix=self.omit_signature_prefix,
             )
         else:
             for metric_spec in self.judge_metrics:
@@ -170,7 +163,6 @@ class Judge(dspy.Module):
     def _run_llm_judges(self, slide_payload: list[dict[str, Any]],
                         context: dict[str, Any], results: MetricResultMap) -> None:
         if self.one_call_per_metric and self.judges_by_metric:
-            # Independent per-metric calls allow metric-specific prompts/signatures.
             for metric_name, metric_judge in self.judges_by_metric.items():
                 prediction = metric_judge(slides=slide_payload, **context)
                 self._merge_llm_prediction(
@@ -206,9 +198,15 @@ class Judge(dspy.Module):
     def _merge_llm_prediction(self, result: dspy.Prediction, processed_results: MetricResultMap,
                               metric_name: str | None = None) -> None:
         if self.reduce_to_signature_level:
-            # Convert flattened primitive outputs back into rubric model instances.
-            metric_results = self._restore_metrics_from_signature(
-                result, metric_name)
+            metric_map = self._flattened_metric_map
+            if metric_name:
+                metric_map = self._flattened_metric_maps_by_metric.get(
+                    metric_name, {})
+            metric_results = restore_metrics_from_signature(
+                prediction=result,
+                metric_map=metric_map,
+                rubric_models=self._rubric_models_by_name,
+            )
         else:
             metric_results = []
             for key in result.toDict():
@@ -217,99 +215,40 @@ class Judge(dspy.Module):
                     metric_results.append(metric_result)
 
         for metric_result in metric_results:
-            self._set_metric_criteria_from_field_names(metric_result)
-            if not metric_result.required_slide_type:
-                processed_results.setdefault("unit_level", {}).setdefault(
-                    metric_result.metric_type, {}).setdefault(metric_result.metric_name, metric_result)
-            else:
-                processed_results.setdefault("slide_level", {}).setdefault(
-                    f"slide-{metric_result.index_}-{metric_result.metric_type}", {}).setdefault(metric_result.metric_name, metric_result)
+            apply_metric_criteria_from_field_names(metric_result)
+            store_metric_result(processed_results, metric_result)
 
-    def _set_metric_criteria_from_field_names(self, metric_result: BaseRubric) -> None:
-        """Force criterion labels to use rubric field names (`_` -> space)."""
-        for field_name in metric_result.__class__.model_fields:
-            field_value = getattr(metric_result, field_name, None)
-            if isinstance(field_value, BaseMetricType):
-                field_value.criterion = self._format_criterion_key(field_name)
-
-    @staticmethod
-    def _format_criterion_key(key: str) -> str:
-        return key.replace("_", " ").strip()
-
-    def _restore_metrics_from_signature(self, result: dspy.Prediction,
-                                        metric_name: str | None = None) -> list[BaseRubric]:
-        payload_by_metric: dict[str, dict[str, Any]] = {}
-        metric_map = self._flattened_metric_map
-        if metric_name:
-            # In per-metric mode, each judge has its own flattened field map.
-            metric_map = self._flattened_metric_maps_by_metric.get(
-                metric_name, {})
-        for output_name, value in result.toDict().items():
-            mapped = metric_map.get(output_name)
-            if not mapped:
-                continue
-            metric_name, field_name = mapped
-            payload_by_metric.setdefault(metric_name, {})[field_name] = value
-
-        restored: list[BaseRubric] = []
-        for metric_name, payload in payload_by_metric.items():
-            rubric_model = self._rubric_models_by_name.get(metric_name)
-            if rubric_model:
-                restored.append(rubric_model(**payload))
-        return restored
-
-    def _run_rule_based_metrics(self, slides: List[BaseComponent], processed_results: MetricResultMap) -> None:
+    def _run_rule_based_metrics(self, slides: list[BaseComponent], processed_results: MetricResultMap) -> None:
         for metric in self.metrics:
             if not getattr(metric, "metric_type") == "rule_based":
                 continue
             required_slide_type = metric.required_slide_type
             if not required_slide_type:
-                # Unit-level rules evaluate against the full deck.
-                result = metric(slides)  # type:ignore
-                processed_results.setdefault("unit_level", {}).setdefault(
-                    f"rule_based", {}).setdefault(metric.metric_name, result)
+                result = metric(slides)  # type: ignore[misc]
+                rubric_result = self._ensure_rule_rubric_result(
+                    result, metric.metric_name)
+                apply_metric_criteria_from_field_names(rubric_result)
+                store_metric_result(processed_results, rubric_result)
                 continue
+
             for i, slide in enumerate(slides):
-                slide_type = slide.slide_type
-                if required_slide_type == slide_type:
-                    # Slide-level rules run only for matching slide types.
-                    result = metric(slide, index=i)  # type:ignore
-                    processed_results.setdefault("slide_level", {}).setdefault(
-                        f"slide-{i}-{slide_type}", {}).setdefault("rule_based", result)
-
-        if "slide_level" in processed_results:
-            # Stabilize output order for deterministic downstream processing/tests.
-            processed_results["slide_level"] = {
-                key: processed_results["slide_level"][key] for key in
-                sorted(processed_results["slide_level"].keys())
-            }
-
-    def _reduce_to_signature_level(self, signature, judge_metrics: list[JudgeMetricSpec]):
-        flattened_fields: FlattenedMetricMap = {}
-
-        for metric_name, _, rubric in judge_metrics:
-            for field_name, field_info in rubric.model_fields.items():
-                if get_origin(field_info.annotation) is ClassVar:
+                if required_slide_type != slide.slide_type:
                     continue
-                if not field_info.is_required():
-                    continue
-                output_name = (
-                    field_name
-                    if self.omit_signature_prefix
-                    else f"{metric_name}_{field_name}"
-                )
-                # When prefixes are omitted, duplicate field names can appear across metrics.
-                # Keep one signature field and let the later metric mapping win deterministically.
-                if output_name in flattened_fields:
-                    flattened_fields[output_name] = (metric_name, field_name)
-                    continue
-                signature = signature.append(
-                    output_name,
-                    dspy.OutputField(
-                        desc=field_info.description or f"{metric_name}.{field_name}"
-                    ),
-                    field_info.annotation,
-                )
-                flattened_fields[output_name] = (metric_name, field_name)
+                result = metric(slide, index=i)  # type: ignore[misc]
+                rubric_result = self._ensure_rule_rubric_result(
+                    result, metric.metric_name)
+                apply_metric_criteria_from_field_names(rubric_result)
+                store_metric_result(processed_results, rubric_result)
 
-        return signature, flattened_fields
+        sort_slide_level_results(processed_results)
+
+    def _ensure_rule_rubric_result(
+        self,
+        result: BaseRubric | BaseMetricType,
+        metric_name: str,
+    ) -> BaseRubric:
+        if isinstance(result, BaseRubric):
+            return result
+        raise TypeError(
+            f"Rule-based metric `{metric_name}` must return `BaseRubric`, got `{type(result).__name__}`."
+        )
