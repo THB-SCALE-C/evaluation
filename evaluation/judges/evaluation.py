@@ -56,7 +56,12 @@ class Evaluation(dspy.Prediction):
         if not isinstance(other, Evaluation):
             return NotImplemented
         return other.__add__(self)
-    
+
+    @override
+    def keys(self,include_dspy=False) -> list[Any]:
+        return list(self.to_dict().keys())
+
+
     @override
     def get(self, key, default: Any | None = None, normalize=True) -> (Any | None):
         return self.to_dict(normalize=normalize).get(key,default)
