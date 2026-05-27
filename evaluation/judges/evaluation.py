@@ -1,5 +1,5 @@
 import json
-from typing import Any, Iterable
+from typing import Any, Iterable, override
 
 import dspy
 
@@ -56,6 +56,10 @@ class Evaluation(dspy.Prediction):
         if not isinstance(other, Evaluation):
             return NotImplemented
         return other.__add__(self)
+    
+    @override
+    def get(self, key, default: Any | None = None, normalize=True) -> (Any | None):
+        return self.to_dict(normalize=normalize).get(key,default)
 
     @classmethod
     def from_dataframe(cls, df):
