@@ -1,8 +1,5 @@
 from typing import Any, ClassVar, TypeAlias, get_origin
-
 import dspy
-
-from evaluation.lib.assessment_utils import format_criterion_key
 from evaluation.rubrics.base import BaseRubric
 from evaluation.types.assessment_types import BaseMetricType
 
@@ -19,7 +16,7 @@ def apply_metric_criteria_from_field_names(metric_result: BaseRubric) -> None:
     for field_name in metric_result.__class__.model_fields:
         field_value = getattr(metric_result, field_name, None)
         if isinstance(field_value, BaseMetricType):
-            field_value.criterion = format_criterion_key(field_name)
+            field_value.criterion = field_name
 
 
 def store_metric_result(results: MetricResultMap, metric_result: BaseRubric) -> None:
