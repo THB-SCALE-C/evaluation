@@ -4,7 +4,6 @@ from typing import Any, Iterable, override
 import dspy
 
 from evaluation.lib.assessment_utils import (
-    format_criterion_key,
     is_assessment_dict,
     is_negative_assessment,
     is_positive_assessment,
@@ -140,7 +139,7 @@ class Evaluation(dspy.Prediction):
         out: dict[str, dict[str, Any]] = {}
         for path, assessment in self._iter_serialized_assessments(serialized):
             row = self._build_dataframe_row(path, assessment)
-            criterion = str(row.get("criterion") or format_criterion_key(path[-1] if path else ""))
+            criterion = str(row.get("criterion") or path[-1] if path else "")
             payload = dict(row)
             payload.pop("criterion", None)
             out[criterion] = payload
@@ -245,7 +244,7 @@ class Evaluation(dspy.Prediction):
         for key in metric.__class__.model_fields:
             assessment = getattr(metric, key, None)
             if isinstance(assessment, BaseMetricType):
-                assessment.criterion = assessment.criterion or format_criterion_key(key)
+                assessment.criterion = assessment.criterion or key
                 yield metric, assessment
 
     def _build_markdown_sections(
@@ -296,7 +295,7 @@ class Evaluation(dspy.Prediction):
                 continue
             rows.append(
                 {
-                    "criterion": assessment.criterion or format_criterion_key(key),
+                    "criterion": assessment.criterion or key,
                     "score": assessment.score,
                     "feedback": assessment.feedback,
                     "scale": getattr(assessment, "scale", ""),
@@ -315,7 +314,7 @@ class Evaluation(dspy.Prediction):
                 continue
             rows.append(
                 {
-                    "criterion": assessment.get("criterion") or format_criterion_key(str(key)),
+                    "criterion": assessment.get("criterion") or str(key),
                     "score": assessment.get("score", ""),
                     "feedback": assessment.get("feedback", ""),
                     "scale": assessment.get("scale", ""),
@@ -363,7 +362,7 @@ class Evaluation(dspy.Prediction):
         return "\n".join([header, separator, *(format_row(row) for row in escaped_rows)])
 
     def _build_dataframe_row(self, path: tuple[str, ...], assessment: dict[str, Any]) -> dict[str, Any]:
-        criterion = assessment.get("criterion") or format_criterion_key(path[-1] if path else "")
+        criterion = assessment.get("criterion") or path[-1] if path else ""
         parent_path = path[:-1] if path else ()
         row = {
             "criterion": criterion,
@@ -428,7 +427,7 @@ class Evaluation(dspy.Prediction):
                 if converted is None:
                     continue
                 if isinstance(converted, dict) and isinstance(getattr(value, key, None), BaseMetricType):
-                    converted["criterion"] = converted.get("criterion") or format_criterion_key(key)
+                    converted["criterion"] = converted.get("criterion") or key
                     converted["description"] = field_info.description or ""
                 out[key] = converted
             return out
