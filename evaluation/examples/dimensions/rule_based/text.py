@@ -2,9 +2,9 @@ from typing import ClassVar, Tuple
 import re
 
 from creator.schemas.simple import Text
-from evaluation.rubrics import BaseRuleRubric
+from evaluation.dimensions import BaseRuleDimension
 
-class TextRuleBased(BaseRuleRubric[Text]):
+class TextRuleBased(BaseRuleDimension[Text]):
     metric_name: ClassVar = "text"
     metric_type: ClassVar = "rule_based"
     required_slide_type: ClassVar = "text"

@@ -1,25 +1,25 @@
 from typing import Any, ClassVar, TypeAlias, get_origin
 import dspy
-from evaluation.rubrics.base import BaseRubric
+from evaluation.dimensions.base import BaseDimension
 from evaluation.types.assessment_types import BaseMetricType
 
 
 MetricResultMap: TypeAlias = dict[str, dict[str, dict[str, Any]]]
-JudgeMetricSpec: TypeAlias = tuple[str, Any, type[BaseRubric]]
+JudgeMetricSpec: TypeAlias = tuple[str, Any, type[BaseDimension]]
 FlattenedMetricMap: TypeAlias = dict[str, tuple[str, str]]
 
 
 # ---------------------------------------------------
 # Judge Output Processing
 # ---------------------------------------------------
-def apply_metric_criteria_from_field_names(metric_result: BaseRubric) -> None:
+def apply_metric_criteria_from_field_names(metric_result: BaseDimension) -> None:
     for field_name in metric_result.__class__.model_fields:
         field_value = getattr(metric_result, field_name, None)
         if isinstance(field_value, BaseMetricType):
             field_value.criterion = field_name
 
 
-def store_metric_result(results: MetricResultMap, metric_result: BaseRubric) -> None:
+def store_metric_result(results: MetricResultMap, metric_result: BaseDimension) -> None:
     if not metric_result.required_slide_type:
         metric_bucket = results.setdefault("unit_level", {}).setdefault(metric_result.metric_type, {})
         metric_bucket[metric_result.metric_name] = metric_result
@@ -28,6 +28,18 @@ def store_metric_result(results: MetricResultMap, metric_result: BaseRubric) -> 
     slide_key = f"slide-{metric_result.index_}-{metric_result.metric_type}"
     slide_bucket = results.setdefault("slide_level", {}).setdefault(slide_key, {})
     slide_bucket[metric_result.metric_name] = metric_result
+
+
+def merge_metric_results(*result_maps: MetricResultMap) -> MetricResultMap:
+    merged: MetricResultMap = {}
+
+    for result_map in result_maps:
+        for level, scope_map in result_map.items():
+            merged_scope_map = merged.setdefault(level, {})
+            for scope_key, metrics in scope_map.items():
+                merged_scope_map.setdefault(scope_key, {}).update(metrics)
+
+    return merged
 
 
 def sort_slide_level_results(results: MetricResultMap) -> None:
@@ -40,8 +52,8 @@ def sort_slide_level_results(results: MetricResultMap) -> None:
 def restore_metrics_from_signature(
     prediction: dspy.Prediction,
     metric_map: FlattenedMetricMap,
-    rubric_models: dict[str, type[BaseRubric]],
-) -> list[BaseRubric]:
+    dimension_models: dict[str, type[BaseDimension]],
+) -> list[BaseDimension]:
     payload_by_metric: dict[str, dict[str, Any]] = {}
 
     for output_name, value in prediction.toDict().items():
@@ -51,11 +63,11 @@ def restore_metrics_from_signature(
         metric_name, field_name = mapped
         payload_by_metric.setdefault(metric_name, {})[field_name] = value
 
-    restored: list[BaseRubric] = []
+    restored: list[BaseDimension] = []
     for metric_name, payload in payload_by_metric.items():
-        rubric_model = rubric_models.get(metric_name)
-        if rubric_model:
-            restored.append(rubric_model(**payload))
+        dimension_model = dimension_models.get(metric_name)
+        if dimension_model:
+            restored.append(dimension_model(**payload))
     return restored
 
 
@@ -69,8 +81,8 @@ def reduce_signature_to_metric_fields(
 ) -> tuple[Any, FlattenedMetricMap]:
     flattened_fields: FlattenedMetricMap = {}
 
-    for metric_name, _, rubric in judge_metrics:
-        for field_name, field_info in rubric.model_fields.items():
+    for metric_name, _, dimension in judge_metrics:
+        for field_name, field_info in dimension.model_fields.items():
             if get_origin(field_info.annotation) is ClassVar:
                 continue
             if not field_info.is_required():
@@ -83,7 +95,7 @@ def reduce_signature_to_metric_fields(
 
             signature = signature.append(
                 output_name,
-                dspy.OutputField(desc=field_info.description or f"{metric_name}.{field_name}"),
+                dspy.OutputField(desc=field_info.description) or dspy.OutputField(),
                 field_info.annotation,
             )
             flattened_fields[output_name] = (metric_name, field_name)

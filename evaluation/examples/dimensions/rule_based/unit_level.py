@@ -2,10 +2,10 @@ from typing import ClassVar, Tuple
 import re
 
 from creator.schemas.simple import Text, DragText, SingleChoice
-from evaluation.rubrics import BaseRuleRubric
+from evaluation.dimensions import BaseRuleDimension
 
 
-class UnitConsistency(BaseRuleRubric[list[Text | DragText | SingleChoice]]):
+class UnitConsistency(BaseRuleDimension[list[Text | DragText | SingleChoice]]):
     metric_name: ClassVar = "unit_consistency"
     metric_type: ClassVar = "rule_based"
     required_slide_type: ClassVar = None

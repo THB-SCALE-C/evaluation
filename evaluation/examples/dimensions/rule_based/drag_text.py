@@ -1,8 +1,8 @@
 from typing import ClassVar, Tuple
-from evaluation.rubrics import BaseRuleRubric
+from evaluation.dimensions import BaseRuleDimension
 from creator.schemas.simple import DragText
 
-class DragTextRuleBased(BaseRuleRubric[DragText]):
+class DragTextRuleBased(BaseRuleDimension[DragText]):
     metric_name:ClassVar = "drag_text"
     metric_type:ClassVar = "rule_based"
     required_slide_type:ClassVar = "drag_text"

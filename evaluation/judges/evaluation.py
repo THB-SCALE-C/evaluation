@@ -11,7 +11,7 @@ from evaluation.lib.assessment_utils import (
     score_to_numeric,
     escape_markdown_cell,
 )
-from evaluation.rubrics.base import BaseRubric
+from evaluation.dimensions.base import BaseDimension
 from evaluation.types.assessment_types import BaseMetricType
 
 
@@ -37,19 +37,21 @@ class Evaluation(dspy.Prediction):
     # ---------------------------------------------------
     # Main Functionality
     # ---------------------------------------------------
-    def __init__(self, results: dict[str, dict[str, dict[str, BaseRubric]]], *args, **kwargs):
+    def __init__(self, results: dict[str, dict[str, dict[str, BaseDimension]]], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.results = results
 
     def __repr__(self):
         return self.generate_assessment()
 
-    def __add__(self, other: Any):
+    @override
+    def __add__(self, other: Any) -> "Evaluation": # type: ignore
         if not isinstance(other, Evaluation):
             return NotImplemented
         return Evaluation(results=self._deep_merge_results(self.results, other.results))
 
-    def __radd__(self, other: Any):
+    @override
+    def __radd__(self, other: Any) -> "Evaluation": # type: ignore
         if other == 0:
             return self
         if not isinstance(other, Evaluation):
@@ -230,7 +232,7 @@ class Evaluation(dspy.Prediction):
         return self._render_feedback_rows(rows, exclude_positive_feedback, exclude_headers=exclude_headers)
 
     def _iter_assessments(self, data: Any):
-        if isinstance(data, BaseRubric):
+        if isinstance(data, BaseDimension):
             yield from self._iter_metric_assessments(data)
             return
         if is_assessment_dict(data):
@@ -240,7 +242,7 @@ class Evaluation(dspy.Prediction):
             for value in data.values():
                 yield from self._iter_assessments(value)
 
-    def _iter_metric_assessments(self, metric: BaseRubric):
+    def _iter_metric_assessments(self, metric: BaseDimension):
         for key in metric.__class__.model_fields:
             assessment = getattr(metric, key, None)
             if isinstance(assessment, BaseMetricType):
@@ -254,7 +256,7 @@ class Evaluation(dspy.Prediction):
         exclude_positive_feedback: bool,
         exclude_headers: Iterable[str] | None = None,
     ) -> list[str]:
-        if isinstance(data, BaseRubric):
+        if isinstance(data, BaseDimension):
             rows = self._rows_from_metric(data, exclude_positive_feedback)
             return [self._render_feedback_rows(rows, exclude_positive_feedback, exclude_headers=exclude_headers)]
 
@@ -271,7 +273,7 @@ class Evaluation(dspy.Prediction):
 
         sections: list[str] = []
         for key, value in data.items():
-            if not isinstance(value, (dict, BaseRubric)):
+            if not isinstance(value, (dict, BaseDimension)):
                 continue
             child_sections = self._build_markdown_sections(
                 data=value,
@@ -285,7 +287,7 @@ class Evaluation(dspy.Prediction):
                 sections.extend(child_sections)
         return sections
 
-    def _rows_from_metric(self, metric: BaseRubric, exclude_positive_feedback: bool) -> list[dict[str, str]]:
+    def _rows_from_metric(self, metric: BaseDimension, exclude_positive_feedback: bool) -> list[dict[str, str]]:
         rows: list[dict[str, Any]] = []
         for key, field_info in metric.__class__.model_fields.items():
             assessment = getattr(metric, key, None)
@@ -416,7 +418,7 @@ class Evaluation(dspy.Prediction):
                 payload.update(normalize_metric(value))
             return payload
 
-        if isinstance(value, BaseRubric):
+        if isinstance(value, BaseDimension):
             out: dict[str, Any] = {}
             for key, field_info in value.__class__.model_fields.items():
                 converted = self._serialize_to_plain_dict(

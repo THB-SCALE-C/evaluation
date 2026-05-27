@@ -1,8 +1,8 @@
 from typing import ClassVar
-from evaluation.rubrics.base import BaseRubric
+from evaluation.dimensions.base import BaseDimension
 
 
-class BaseDidacticalRubric(BaseRubric):
+class BaseDidacticalDimension(BaseDimension):
     metric_type:ClassVar = "didactical"
     is_llm_judge:ClassVar = True
     

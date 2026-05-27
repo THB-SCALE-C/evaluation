@@ -1,10 +1,10 @@
 from typing import ClassVar, Tuple
 
 from creator.schemas.simple import SingleChoice
-from evaluation.rubrics import BaseRuleRubric
+from evaluation.dimensions import BaseRuleDimension
 
 
-class SingleChoiceRuleBased(BaseRuleRubric[SingleChoice]):
+class SingleChoiceRuleBased(BaseRuleDimension[SingleChoice]):
     metric_name: ClassVar = "single_choice"
     metric_type: ClassVar = "rule_based"
     required_slide_type: ClassVar = "single_choice"

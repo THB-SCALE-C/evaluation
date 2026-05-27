@@ -2,7 +2,7 @@ from typing import ClassVar
 from pydantic import BaseModel, Field
 
 
-class BaseRubric(BaseModel):
+class BaseDimension(BaseModel):
     metric_name:ClassVar[str]
     metric_type:ClassVar[str]
     required_slide_type:ClassVar[str|None] = None

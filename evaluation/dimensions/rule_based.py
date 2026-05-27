@@ -1,11 +1,11 @@
 from abc import abstractmethod
 from typing import Any, ClassVar, Tuple
 import pydantic
-from evaluation.rubrics.base import BaseRubric
+from evaluation.dimensions.base import BaseDimension
 from evaluation.types.assessment_types import BaseMetricType, BinaryMetricType
 
 
-class BaseRuleRubric[T]():
+class BaseRuleDimension[T]():
     """
     Rule based metric checker. 
     Define Metrics as instance functions that return `Tuple[bool, str (feedback)]`, use `def check` for auto suggestion.
@@ -51,7 +51,7 @@ class BaseRuleRubric[T]():
                "index_":int|None}
         model = pydantic.create_model(
             self.__class__.__name__,
-            __base__=BaseRubric,
+            __base__=BaseDimension,
               **fields)  # type:ignore
         evals["index_"] = index
         return model(**evals)
