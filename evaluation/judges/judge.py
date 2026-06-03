@@ -83,6 +83,9 @@ class Judge(dspy.Module):
         results = merge_metric_results(llm_results, rule_results)
         return Evaluation(results)
 
+    def __call__(self, *args, **kwargs) -> Evaluation:
+        return super().__call__(*args, **kwargs) # type:ignore
+
     # ---------------------------------------------------
     # Helper Functions
     # ---------------------------------------------------

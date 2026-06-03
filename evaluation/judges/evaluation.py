@@ -2,6 +2,7 @@ import json
 from typing import Any, Iterable, override
 
 import dspy
+from numpy import mean
 
 from evaluation.lib.assessment_utils import (
     is_assessment_dict,
@@ -40,6 +41,7 @@ class Evaluation(dspy.Prediction):
     def __init__(self, results: dict[str, dict[str, dict[str, BaseDimension]]], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.results = results
+        print(results)
 
     def __repr__(self):
         return self.generate_assessment()
@@ -446,19 +448,31 @@ class Evaluation(dspy.Prediction):
                     out[str(key)] = converted
             return out
 
-        if isinstance(value, (list, tuple, set)):
-            return [
-                converted
-                for converted in (
-                    self._serialize_to_plain_dict(
-                        item,
-                        exclude_positive_feedback=exclude_positive_feedback,
-                        normalize=normalize,
-                    )
-                    for item in value
-                )
-                if converted is not None
-            ]
+        if isinstance(value, (list, tuple)):
+            scores = []
+            feedbacks = []
+            for i,item in enumerate(value):
+                if item is not None:
+                    scores.append(item.score)
+                    feedbacks.append(f"{f"{i}."} {item.feedback}")
+            
+            if isinstance(value[0], BaseMetricType):
+                base = value[0]
+                payload = {
+                    "score" : float(mean(scores)),
+                    "feedback": "\n".join(feedbacks),
+                    "criterion": None,
+                    "description": getattr(base, "description", None),
+                    "scale": getattr(base, "scale", None),
+                    "min": getattr(base, "min", None),
+                    "max": getattr(base, "max", None),
+                    "scores" : scores,
+                    "feedbacks": feedbacks
+                }
+                if normalize:
+                    payload["score"] = (payload["score"] - payload["min"]) / payload["max"]
+                return payload
+            return {}
 
         if hasattr(value, "model_dump") and callable(value.model_dump):
             return self._serialize_to_plain_dict(
