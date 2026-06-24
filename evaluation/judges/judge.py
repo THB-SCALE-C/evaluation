@@ -138,6 +138,11 @@ class Judge(dspy.Module):
         if not (self.judge and self.judge_metrics):
             return results
 
+        # If context was not predefined in signature, add dynamically
+        for k in context.keys():
+            if k not in self.judge.signature.input_fields: # type:ignore
+                self.judge.signature.insert(1,k,dspy.InputField()) # type:ignore
+
         prediction = self.judge(slides=slide_payload, **context)
         self._merge_llm_prediction(prediction, results)
         return results
