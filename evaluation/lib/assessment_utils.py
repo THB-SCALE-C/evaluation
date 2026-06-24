@@ -51,23 +51,6 @@ def is_positive_assessment(assessment: Any) -> bool:
     return numeric_max is not None and float(score) >= numeric_max
 
 
-def is_negative_assessment(assessment: Any) -> bool:
-    score = assessment_value(assessment, "score")
-    min_value = assessment_value(assessment, "min")
-
-    if isinstance(score, str):
-        normalized_score = score.lower()
-        if normalized_score in {"yes", "no"}:
-            return normalized_score == "no"
-        return isinstance(min_value, str) and normalized_score == min_value.lower()
-
-    if not isinstance(score, (int, float)):
-        return False
-
-    numeric_min = to_float(min_value)
-    return numeric_min is not None and float(score) <= numeric_min
-
-
 def score_to_numeric(assessment: Any) -> float:
     score = assessment_value(assessment, "score")
 

@@ -1,5 +1,6 @@
 from abc import abstractmethod
-from typing import Any, ClassVar, Tuple
+import inspect
+from typing import Any, Callable, ClassVar, Tuple
 import pydantic
 from evaluation.dimensions.base import BaseDimension
 from evaluation.types.assessment_types import BaseMetricType, BinaryMetricType
@@ -21,7 +22,7 @@ class BaseRuleDimension[T]():
             else "to few question items" if to_few else "okay"
         return not (to_many or to_few), feedback```
     """
-    metric_type: ClassVar[str] = "rule_based"
+    metric_type: ClassVar = BinaryMetricType
     metric_name: ClassVar[str] = ""
     required_slide_type:ClassVar = ""
     is_llm_judge = False
@@ -36,18 +37,19 @@ class BaseRuleDimension[T]():
             if key.startswith("_") or key == "evaluate":
                 continue
             func = getattr(self, key)
-            if hasattr(func, "__call__"):
+            if inspect.ismethod(func) and not func.__name__.startswith("_"):
                 res = func(data)
                 if not res:
                     continue
                 checked, feedback = res
-                evals[key] = BinaryMetricType(
-                    criterion=key,
-                    score="yes" if checked else "no",
+                if isinstance(checked,bool):
+                    checked = int(checked)
+                evals[key] = self.metric_type(
+                    score=checked, #type:ignore
                     feedback=feedback
                 )
         fields = {key: BaseMetricType for key in evals.keys()} \
-            | {"metric_type": (ClassVar, self.metric_type), "metric_name": (ClassVar, self.metric_name), "required_slide_type":(ClassVar, self.required_slide_type),
+            | {"metric_name": (ClassVar, self.metric_name), "required_slide_type":(ClassVar, self.required_slide_type),
                "index_":int|None}
         model = pydantic.create_model(
             self.__class__.__name__,
@@ -56,6 +58,6 @@ class BaseRuleDimension[T]():
         evals["index_"] = index
         return model(**evals)
 
-    @abstractmethod
-    def check(self, data: T) -> Tuple[bool, str]:
+
+    def check(self, data: T) -> Tuple[Any, str]: #type:ignore
         pass

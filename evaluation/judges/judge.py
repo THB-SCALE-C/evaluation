@@ -6,7 +6,6 @@ from evaluation.lib.judge_utils import (
     FlattenedMetricMap,
     JudgeMetricSpec,
     MetricResultMap,
-    apply_metric_criteria_from_field_names,
     merge_metric_results,
     reduce_signature_to_metric_fields,
     restore_metrics_from_signature,
@@ -185,7 +184,6 @@ class Judge(dspy.Module):
                     metric_results.append(metric_result)
 
         for metric_result in metric_results:
-            apply_metric_criteria_from_field_names(metric_result)
             store_metric_result(processed_results, metric_result)
 
     def _run_rule_based_metrics(self, slides: list[BaseComponent]) -> MetricResultMap:
@@ -196,7 +194,6 @@ class Judge(dspy.Module):
                 result = metric(slides)  # type: ignore[misc]
                 dimension_result = self._ensure_rule_dimension_result(
                     result, metric.metric_name)
-                apply_metric_criteria_from_field_names(dimension_result)
                 store_metric_result(processed_results, dimension_result)
                 continue
 
@@ -206,7 +203,6 @@ class Judge(dspy.Module):
                 result = metric(slide, index=i)  # type: ignore[misc]
                 dimension_result = self._ensure_rule_dimension_result(
                     result, metric.metric_name)
-                apply_metric_criteria_from_field_names(dimension_result)
                 store_metric_result(processed_results, dimension_result)
 
         sort_slide_level_results(processed_results)

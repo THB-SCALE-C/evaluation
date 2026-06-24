@@ -4,30 +4,21 @@ from evaluation.dimensions.base import BaseDimension
 from evaluation.types.assessment_types import BaseMetricType
 
 
-MetricResultMap: TypeAlias = dict[str, dict[str, dict[str, Any]]]
+MetricResultMap: TypeAlias = dict[str, dict[str, Any]]
 JudgeMetricSpec: TypeAlias = tuple[str, Any, type[BaseDimension]]
 FlattenedMetricMap: TypeAlias = dict[str, tuple[str, str]]
 
 
-# ---------------------------------------------------
-# Judge Output Processing
-# ---------------------------------------------------
-def apply_metric_criteria_from_field_names(metric_result: BaseDimension) -> None:
-    for field_name in metric_result.__class__.model_fields:
-        field_value = getattr(metric_result, field_name, None)
-        if isinstance(field_value, BaseMetricType):
-            field_value.criterion = field_name
-
 
 def store_metric_result(results: MetricResultMap, metric_result: BaseDimension) -> None:
     if not metric_result.required_slide_type:
-        metric_bucket = results.setdefault("unit_level", {}).setdefault(metric_result.metric_type, {})
+        metric_bucket = results.setdefault("unit_level", {})
         metric_bucket[metric_result.metric_name] = metric_result
         return
 
-    slide_key = f"slide-{metric_result.index_}-{metric_result.metric_type}"
-    slide_bucket = results.setdefault("slide_level", {}).setdefault(slide_key, {})
-    slide_bucket[metric_result.metric_name] = metric_result
+    slide_key = f"slide-{metric_result.index_}-{metric_result.metric_name}"
+    slide_bucket = results.setdefault("slide_level", {})
+    slide_bucket[slide_key] = metric_result
 
 
 def merge_metric_results(*result_maps: MetricResultMap) -> MetricResultMap:

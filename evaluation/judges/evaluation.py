@@ -1,54 +1,41 @@
 import json
 from typing import Any, Iterable, override
-
 import dspy
-from numpy import mean
+import numpy as np
 from pydantic import BaseModel
-
-from evaluation.lib.assessment_utils import (
-    is_assessment_dict,
-    is_negative_assessment,
-    is_positive_assessment,
-    normalize_metric,
-    score_to_numeric,
-    escape_markdown_cell,
-)
+from evaluation.dimensions.rule_based import BaseRuleDimension
 from evaluation.dimensions.base import BaseDimension
 from evaluation.types.assessment_types import BaseMetricType
 
+PATH_DELIMITER = "."
+
+
+def _flatten_results(results: dict[str, dict[str, dict]], path_delimiter: str = "%"):
+    _flattened: list[BaseMetricType] = []
+    for path_0, val_0 in results.items():
+        for path_1, val_1 in val_0.items():
+            for path_2, metric in dict(val_1).items():
+                if not isinstance(metric, BaseMetricType):
+                    continue
+                key = f"{path_0}{path_delimiter}{path_1}{path_delimiter}{path_2}"
+                metric._criterion = key
+                metric._is_llm_judge = val_1.get("is_llm_judge",False)
+                _flattened.append(metric)
+    return _flattened
+
 
 class Evaluation(dspy.Prediction):
-    """Container and rendering helpers for judge outputs."""
-
-    TABLE_COLUMNS = ("criterion", "score", "feedback",
-                     "scale", "description", "path")
-    TABLE_HEADERS = ("Criterion", "Score", "Feedback",
-                     "Scale", "Description", "Path")
-    DATAFRAME_PRIORITY_COLUMNS = (
-        "criterion",
-        "score",
-        "feedback",
-        "scale",
-        "description",
-        "path",
-        "path_depth",
-        "min",
-        "max",
-    )
-    DATAFRAME_REQUIRED_COLUMNS = frozenset(
-        {"path", "criterion", "description", "score", "feedback", "scale", "min", "max"})
-    DATAFRAME_ASSESSMENT_KEYS = (
-        "criterion", "description", "score", "feedback", "scale", "min", "max")
-
     # ---------------------------------------------------
     # Main Functionality
     # ---------------------------------------------------
-    def __init__(self, results: dict[str, dict[str, dict[str, BaseDimension]]], *args, **kwargs):
+    def __init__(self, results: dict[str, dict[str, Any]], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.results = results
+        self._flattened_results = _flatten_results(
+            results, path_delimiter=PATH_DELIMITER)
 
     def __repr__(self):
-        return self.generate_assessment()
+        return NotImplemented
 
     @override
     def __add__(self, other: Any) -> "Evaluation":  # type: ignore
@@ -72,442 +59,170 @@ class Evaluation(dspy.Prediction):
     def get(self, key, default: Any | None = None, normalize=True) -> (Any | None):
         return self.to_dict(normalize=normalize).get(key, default)
 
-    @classmethod
-    def from_dataframe(cls, df):
-        pd = cls._require_pandas("from_dataframe")
-        if not isinstance(df, pd.DataFrame):
-            raise TypeError("`df` must be a pandas DataFrame.")
-
-        missing = cls.DATAFRAME_REQUIRED_COLUMNS - set(df.columns)
-        if missing:
-            raise ValueError(
-                f"Missing required columns for from_dataframe(): {sorted(missing)}")
-
-        results: dict[str, Any] = {}
-        for idx, row in df.iterrows():
-            raw_path = row.get("path")
-            if not isinstance(raw_path, str):
-                raise ValueError(
-                    f"Row {idx} has invalid `path`. Expected dot-separated string.")
-            criterion = row.get("criterion")
-            if not isinstance(criterion, str) or not criterion.strip():
-                raise ValueError(
-                    f"Row {idx} has invalid `criterion`. Expected non-empty string.")
-
-            parts = [part.strip()
-                     for part in raw_path.split(".") if part.strip()]
-            leaf_key = criterion.strip().replace(" ", "_")
-            cursor = results
-            for part in parts:
-                node = cursor.get(part)
-                if node is None:
-                    node = {}
-                    cursor[part] = node
-                elif not isinstance(node, dict):
-                    raise ValueError(
-                        f"Path conflict at row {idx}: `{raw_path}` collides with a non-dict node at `{part}`."
-                    )
-                cursor = node
-
-            cursor[leaf_key] = {key: row.get(key)
-                                for key in cls.DATAFRAME_ASSESSMENT_KEYS}
-
-        return cls(results=results)
-
-    def generate_assessment(
-        self,
-        exclude_positive_feedback: bool = False,
-        md_header_level: int = 1,
-        rule_based_as_penalty: bool = False,
-        prefix: str = "[### EVALUATION ###]\n",
-        suffix: str = "[### EVALUATION END ###]",
-        flatten: bool = True,
-        exclude_headers: Iterable[str] | None = None,
-    ) -> str:
-        details = (
-            self._render_markdown_feedback_flat(
-                exclude_positive_feedback=exclude_positive_feedback,
-                exclude_headers=exclude_headers,
-            )
-            if flatten
-            else self._render_markdown_feedback_tree(
-                exclude_positive_feedback=exclude_positive_feedback,
-                md_header_level=md_header_level,
-                exclude_headers=exclude_headers,
-            )
-        )
-        total_score = self._compute_overall_score(
-            rule_based_as_penalty=rule_based_as_penalty)
-        return prefix + f"Total Score: {total_score:.4f}\n---\nDetails:\n{details}\n" + suffix
-
-    def to_dict(self, exclude_positive_feedback: bool = False, normalize: bool = False):
-        serialized = self._serialize_to_plain_dict(
-            self.results,
-            exclude_positive_feedback=exclude_positive_feedback,
-            normalize=normalize,
-        )
-        if not isinstance(serialized, dict):
-            return {}
-
-        out: dict[str, dict[str, Any]] = {}
-        for path, assessment in self._iter_serialized_assessments(serialized):
-            row = self._build_dataframe_row(path, assessment)
-            criterion = str(row.get("criterion") or path[-1] if path else "")
-            payload = dict(row)
-            payload.pop("criterion", None)
-            out[criterion] = payload
-        return out
-
-    def to_dataframe(self, exclude_positive_feedback: bool = False, normalize: bool = False):
-        pd = self._require_pandas("to_dataframe")
-        serialized = self.to_dict(
-            exclude_positive_feedback=exclude_positive_feedback,
-            normalize=normalize,
-        )
-
-        rows: list[dict[str, Any]] = [
-            {"criterion": criterion, **assessment} for criterion, assessment in serialized.items()]
-        if not rows:
-            return pd.DataFrame(columns=self.DATAFRAME_PRIORITY_COLUMNS)
-
-        df = pd.DataFrame(rows)
-        path_columns = sorted(
-            (column for column in df.columns if column.startswith("path_")),
-            key=self._path_column_sort_key,
-        )
-        ordered = [
-            column for column in self.DATAFRAME_PRIORITY_COLUMNS if column in df.columns]
-        ordered.extend(
-            column for column in path_columns if column not in ordered)
-        ordered.extend(
-            column for column in df.columns if column not in ordered)
-        return df.reindex(columns=ordered)
-
-    def get_total_score(self, rule_based_as_penalty: bool = False) -> float:
-        return self._compute_overall_score(rule_based_as_penalty=rule_based_as_penalty)
-
-    def get_feedback(self, exclude_positive_feedback: bool = False, json_formatted: bool = False, md_header_level: int = 1) -> str:
-        if json_formatted:
-            payload = self.to_dict(
-                exclude_positive_feedback=exclude_positive_feedback)
-            return json.dumps(payload, ensure_ascii=False, indent=2)
-        return self._render_markdown_feedback_tree(
-            exclude_positive_feedback=exclude_positive_feedback,
-            md_header_level=md_header_level,
-        )
-
-    # ---------------------------------------------------
-    # Helper Functions
-    # ---------------------------------------------------
-    def _compute_overall_score(self, rule_based_as_penalty: bool = False) -> float:
-        scores: list[float] = []
-        for metric, assessment in self._iter_assessments(self.results):
-            if rule_based_as_penalty and getattr(metric, "metric_type", None) == "rule_based":
-                if not is_negative_assessment(assessment):
-                    continue
-            scores.append(score_to_numeric(assessment))
-        return sum(scores) / len(scores) if scores else 0.0
-
-    def _render_markdown_feedback_tree(
-        self,
-        exclude_positive_feedback: bool = False,
-        md_header_level: int = 1,
-        exclude_headers: Iterable[str] | None = None,
-    ) -> str:
-        sections = self._build_markdown_sections(
-            data=self.results,
-            heading_level=md_header_level,
-            exclude_positive_feedback=exclude_positive_feedback,
-            exclude_headers=exclude_headers,
-        )
-        return "\n".join(section for section in sections if section.strip())
-
-    def _render_markdown_feedback_flat(
-        self,
-        exclude_positive_feedback: bool = False,
-        exclude_headers: Iterable[str] | None = None,
-    ) -> str:
-        serialized = self.to_dict(
-            exclude_positive_feedback=exclude_positive_feedback,
-            normalize=False,
-        )
-        rows = []
-        for criterion, assessment in serialized.items():
-            row = {
-                "criterion": criterion,
-                "score": assessment.get("score", ""),
-                "feedback": assessment.get("feedback", ""),
-                "scale": assessment.get("scale", ""),
-                "description": assessment.get("description", ""),
-                "path": assessment.get("path", ""),
-            }
-            if exclude_headers is not None:
-                excluded = {header.lower() for header in exclude_headers}
-                row = {key: value for key, value in row.items() if key.lower()
-                       not in excluded}
-            rows.append(row)
-        return self._render_feedback_rows(rows, exclude_positive_feedback, exclude_headers=exclude_headers)
-
-    def _iter_assessments(self, data: Any):
-        if isinstance(data, BaseDimension):
-            yield from self._iter_metric_assessments(data)
-            return
-        if is_assessment_dict(data):
-            yield None, data
-            return
-        if isinstance(data, dict):
-            for value in data.values():
-                yield from self._iter_assessments(value)
-
-    def _iter_metric_assessments(self, metric: BaseDimension):
-        for key in metric.__class__.model_fields:
-            assessment = getattr(metric, key, None)
-            if isinstance(assessment, BaseMetricType):
-                assessment.criterion = assessment.criterion or key
-                yield metric, assessment
-
-    def _build_markdown_sections(
-        self,
-        data: Any,
-        heading_level: int,
-        exclude_positive_feedback: bool,
-        exclude_headers: Iterable[str] | None = None,
-    ) -> list[str]:
-        if isinstance(data, BaseDimension):
-            rows = self._rows_from_metric(data, exclude_positive_feedback)
-            return [self._render_feedback_rows(rows, exclude_positive_feedback, exclude_headers=exclude_headers)]
-
-        if self._is_metric_assessment_map(data):
-            rows = self._rows_from_assessment_map(
-                data, exclude_positive_feedback)
-            return [self._render_feedback_rows(rows, exclude_positive_feedback, exclude_headers=exclude_headers)]
-
-        if is_assessment_dict(data):
-            rows = self._rows_from_assessment_map(
-                {"": data}, exclude_positive_feedback)
-            return [self._render_feedback_rows(rows, exclude_positive_feedback, exclude_headers=exclude_headers)]
-
-        if not isinstance(data, dict):
-            return []
-
-        sections: list[str] = []
-        for key, value in data.items():
-            if not isinstance(value, (dict, BaseDimension)):
-                continue
-            child_sections = self._build_markdown_sections(
-                data=value,
-                heading_level=heading_level + 1,
-                exclude_positive_feedback=exclude_positive_feedback,
-                exclude_headers=exclude_headers,
-            )
-            child_sections = [section for section in child_sections if section]
-            if child_sections:
-                sections.append(f"{'#' * min(heading_level, 6)} {key}")
-                sections.extend(child_sections)
-        return sections
-
-    def _rows_from_metric(self, metric: BaseDimension, exclude_positive_feedback: bool) -> list[dict[str, str]]:
-        rows: list[dict[str, Any]] = []
-        for key, field_info in metric.__class__.model_fields.items():
-            assessment = getattr(metric, key, None)
-            if not isinstance(assessment, BaseMetricType):
-                continue
-            if exclude_positive_feedback and is_positive_assessment(assessment):
-                continue
-            rows.append(
-                {
-                    "criterion": assessment.criterion or key,
-                    "score": assessment.score,
-                    "feedback": assessment.feedback,
-                    "scale": getattr(assessment, "scale", ""),
-                    "description": field_info.description or "",
-                    "path": "",
-                }
-            )
-        return rows
-
-    def _rows_from_assessment_map(self, assessments: dict[str, dict[str, Any]], exclude_positive_feedback: bool) -> list[dict[str, str]]:
-        rows: list[dict[str, str]] = []
-        for key, assessment in assessments.items():
-            if not isinstance(assessment, dict):
-                continue
-            if exclude_positive_feedback and is_positive_assessment(assessment):
-                continue
-            rows.append(
-                {
-                    "criterion": assessment.get("criterion") or str(key),
-                    "score": assessment.get("score", ""),
-                    "feedback": assessment.get("feedback", ""),
-                    "scale": assessment.get("scale", ""),
-                    "description": assessment.get("description", ""),
-                    "path": "",
-                }
-            )
-        return rows
-
-    def _render_feedback_rows(
-        self,
-        rows: list[dict[str, Any]],
-        exclude_positive_feedback: bool,
-        exclude_headers: Iterable[str] | None = None,
-    ) -> str:
-        if not rows:
-            return "" if exclude_positive_feedback else "_No feedback entries._"
-        return self._render_markdown_table(rows, exclude_headers=exclude_headers)
-
-    def _render_markdown_table(self, rows: list[dict[str, Any]], exclude_headers: Iterable[str] | None = None) -> str:
-        excluded = {header.lower(
-        ) for header in exclude_headers} if exclude_headers is not None else set()
-        included_columns: list[tuple[str, str]] = [
-            (column, header)
-            for column, header in zip(self.TABLE_COLUMNS, self.TABLE_HEADERS)
-            if header.lower() not in excluded and column.lower() not in excluded
-        ]
-        if not included_columns:
-            return "" if rows else "_No feedback entries._"
-
-        escaped_rows = [
-            tuple(escape_markdown_cell(row.get(column, ""))
-                  for column, _ in included_columns)
-            for row in rows
-        ]
-        headers = tuple(header for _, header in included_columns)
-        widths = [len(header) for header in headers]
-        for row in escaped_rows:
-            for idx, cell in enumerate(row):
-                widths[idx] = max(widths[idx], len(cell))
-
-        def format_row(values: tuple[str, ...]) -> str:
-            return "| " + " | ".join(value.ljust(widths[idx]) for idx, value in enumerate(values)) + " |"
-
-        header = format_row(headers)
-        separator = "|" + "|".join("-" * (width + 2) for width in widths) + "|"
-        return "\n".join([header, separator, *(format_row(row) for row in escaped_rows)])
-
-    def _build_dataframe_row(self, path: tuple[str, ...], assessment: dict[str, Any]) -> dict[str, Any]:
-        criterion = assessment.get("criterion") or path[-1] if path else ""
-        parent_path = path[:-1] if path else ()
-        row = {
-            "criterion": criterion,
-            "score": assessment.get("score"),
-            "feedback": assessment.get("feedback"),
-            "scale": assessment.get("scale"),
-            "description": assessment.get("description"),
-            "path": ".".join(parent_path),
-            "path_depth": len(parent_path),
-            "min": assessment.get("min"),
-            "max": assessment.get("max"),
-        }
-        for idx, part in enumerate(parent_path):
-            row[f"path_{idx}"] = part
-        for key, value in assessment.items():
-            if key not in row:
-                row[key] = value
-        return row
-
-    def _iter_serialized_assessments(self, node: Any, path: tuple[str, ...] = ()):
-        if isinstance(node, dict):
-            if is_assessment_dict(node):
-                yield path, node
-                return
-            for key, value in node.items():
-                yield from self._iter_serialized_assessments(value, (*path, str(key)))
-            return
-        if isinstance(node, (list, tuple)):
-            for idx, value in enumerate(node):
-                yield from self._iter_serialized_assessments(value, (*path, str(idx)))
-
-    def _is_metric_assessment_map(self, value: Any) -> bool:
-        return isinstance(value, dict) and bool(value) and all(is_assessment_dict(item) for item in value.values())
-
-    def _serialize_to_plain_dict(self, value: Any, exclude_positive_feedback: bool, normalize: bool = False) -> Any:
-        if value is None or isinstance(value, (str, int, float, bool)):
-            return value
-
-        if isinstance(value, BaseDimension):
-            out: dict[str, Any] = {}
-            for key, field_info in value.__class__.model_fields.items():
-                converted = self._serialize_to_plain_dict(
-                    getattr(value, key, None),
-                    exclude_positive_feedback=exclude_positive_feedback,
-                    normalize=normalize,
-                )
-                if converted is None:
-                    continue
-                if isinstance(converted, dict) and isinstance(getattr(value, key, None), BaseModel):
-                    converted["criterion"] = converted.get("criterion") or key
-                    converted["description"] = field_info.description or ""
-                out[key] = converted
-            return out
-
-        if isinstance(value, BaseModel):
-            if exclude_positive_feedback and is_positive_assessment(value):
-                return None
-            payload = {
-                "criterion": getattr(value, "criterion", None),
-                "score": getattr(value, "score", None),
-                "scores": [s.model_dump() for s in getattr(value, "scores", [])],
-                "feedback": getattr(value, "feedback", None),
-                "description": getattr(value, "description", None),
-                "scale": getattr(value, "scale", None),
-                "min": getattr(value, "min", None),
-                "max": getattr(value, "max", None),
-            }
-            if normalize:
-                payload.update(normalize_metric(value))
-            return payload
-
-        if isinstance(value, dict):
-            out: dict[str, Any] = {}
-            for key, item in value.items():
-                converted = self._serialize_to_plain_dict(
-                    item,
-                    exclude_positive_feedback=exclude_positive_feedback,
-                    normalize=normalize,
-                )
-                if converted is not None:
-                    out[str(key)] = converted
-            return out
-
-        if hasattr(value, "model_dump") and callable(value.model_dump):
-            return self._serialize_to_plain_dict(
-                value.model_dump(),
-                exclude_positive_feedback=exclude_positive_feedback,
-                normalize=normalize,
-            )
-
-        if hasattr(value, "__dict__"):
-            return self._serialize_to_plain_dict(
-                vars(value),
-                exclude_positive_feedback=exclude_positive_feedback,
-                normalize=normalize,
-            )
-
-        return str(value)
-
-    @staticmethod
-    def _path_column_sort_key(column_name: str) -> int:
-        suffix = column_name.split("_", 1)[1] if "_" in column_name else ""
-        return int(suffix) if suffix.isdigit() else 10**9
-
-    @staticmethod
-    def _require_pandas(caller: str):
-        try:
-            import pandas as pd
-        except ImportError as exc:
-            raise ImportError(
-                f"`pandas` is required for `{caller}()`. Install it with `pip install pandas`.") from exc
-        return pd
-
-    @classmethod
-    def _deep_merge_results(cls, left: Any, right: Any) -> Any:
-        if isinstance(left, dict) and isinstance(right, dict):
-            merged = dict(left)
-            for key, right_value in right.items():
-                if key in merged:
-                    merged[key] = cls._deep_merge_results(
-                        merged[key], right_value)
+    def total_score(self, penalties:list[str]=[]) -> float:
+        # todo: provide a doc string that explains the usage
+        for penalty in penalties:
+            for metric in self._flattened_results:
+                if penalty.endswith("*"):
+                    penalized = penalty.removesuffix("*") in metric.criterion
+                elif penalty.startswith("*"):
+                    penalized = penalty.removeprefix("*") in metric.criterion
                 else:
-                    merged[key] = right_value
-            return merged
-        return right
+                    penalized = metric.criterion == penalty
+                if penalized and metric.score == metric.min: # type:ignore
+                    return 0.0
+        scores = [_normalize_score(val) for val in self._flattened_results]
+        return float(np.mean(scores))
+    
+    def to_markdown_table(self, exclude_positive:bool=False, normalize:bool=False, columns=[
+        "level_1",
+        "level_2",
+        "metric",
+        "score",
+        "feedback",
+        "description",
+        "scale",
+        "is_llm_judge"
+    ]) -> str:
+        """
+        Render flattened evaluation metrics as a markdown table.
+
+        The table is generated from `self._flattened_results` and keeps the
+        implementation intentionally simple and fast:
+
+        - `columns` fully defines which columns are included and in which order.
+        - Column widths are computed dynamically from the header and rendered
+          cell values so the markdown output stays aligned and readable.
+        - `normalize=True` renders the `score` column as a normalized value in
+          the `[0, 1]` range while leaving all other columns unchanged.
+        - `exclude_positive=True` filters out metrics whose raw `score` equals
+          `metric.max`, so only non-perfect results remain in the output.
+
+        Supported columns are:
+        - `level_1`, `level_2`, `metric`: derived from the flattened
+          `criterion` path split by `PATH_DELIMITER`.
+        - `score`: raw or normalized score depending on `normalize`.
+        - `feedback`: metric feedback.
+        - `description`: field description for `feedback` when available.
+        - `scale`: metric scale.
+        - `is_llm_judge`: whether the metric originates from an LLM judge.
+        - any other column name: resolved through `getattr(metric, column, "")`.
+
+        Returns:
+            A markdown table string. If no rows remain after filtering, the
+            header is still returned so the caller gets a valid empty table.
+        """
+        rows = [
+            _metric_to_markdown_row(metric, columns=columns, normalize=normalize)
+            for metric in self._flattened_results
+            if not exclude_positive or metric.score != metric.max # type:ignore
+        ]
+        widths = _compute_markdown_widths(columns, rows)
+        header = _render_markdown_row(columns, widths)
+        separator = _render_markdown_separator(widths)
+        body = [_render_markdown_row(row, widths) for row in rows]
+        return "\n".join([header, separator, *body])
+
+
+def _normalize_score(val:BaseMetricType) -> float:
+    denominator = val.max - val.min
+    if denominator == 0:
+        return 0.0
+    return (val.score - val.min) / denominator #type:ignore
+
+
+# ---------------------------------------------------
+# Helper Functions
+# ---------------------------------------------------
+def _metric_to_markdown_row(
+    metric: BaseMetricType,
+    columns: Iterable[str],
+    normalize: bool = False,
+) -> list[str]:
+    criterion_parts = _split_criterion(metric.criterion)
+    row: list[str] = []
+    for column in columns:
+        row.append(_stringify_markdown_value(metric, column, criterion_parts, normalize))
+    return row
+
+
+def _split_criterion(criterion: str) -> list[str]:
+    parts = criterion.split(PATH_DELIMITER, 2)
+    if len(parts) < 3:
+        parts.extend([""] * (3 - len(parts)))
+    return parts
+
+
+def _stringify_markdown_value(
+    metric: BaseMetricType,
+    column: str,
+    criterion_parts: list[str],
+    normalize: bool,
+) -> str:
+    value = _resolve_metric_column(metric, column, criterion_parts, normalize)
+    return _escape_markdown_cell(value)
+
+
+def _resolve_metric_column(
+    metric: BaseMetricType,
+    column: str,
+    criterion_parts: list[str],
+    normalize: bool,
+) -> Any:
+    if column == "level_1":
+        return criterion_parts[0]
+    if column == "level_2":
+        return criterion_parts[1]
+    if column == "metric":
+        return criterion_parts[2]
+    if column == "score":
+        return _normalize_score(metric) if normalize else metric.score # type:ignore
+    if column == "description":
+        return _metric_description(metric)
+    if column == "scale":
+        return getattr(metric, "scale", "")
+    if column == "is_llm_judge":
+        return getattr(metric, "is_llm_judge", "")
+    return getattr(metric, column, "")
+
+
+def _metric_description(metric: BaseMetricType) -> str:
+    field_info = metric.__class__.model_fields.get("feedback")
+    if not field_info or not field_info.description:
+        return ""
+    return field_info.description
+
+
+def _escape_markdown_cell(value: Any) -> str:
+    if isinstance(value, float):
+        text = f"{value:.4f}".rstrip("0").rstrip(".")
+    elif isinstance(value, tuple):
+        text = ", ".join(str(item) for item in value)
+    else:
+        text = str(value)
+    return text.replace("\r\n", "<br>").replace("\n", "<br>").replace("|", "\\|")
+
+
+def _compute_markdown_widths(columns: Iterable[str], rows: list[list[str]]) -> list[int]:
+    headers = [str(column) for column in columns]
+    widths = [len(header) for header in headers]
+    for row in rows:
+        for index, value in enumerate(row):
+            value_length = len(value)
+            if value_length > widths[index]:
+                widths[index] = value_length
+    return widths
+
+
+def _render_markdown_row(values: Iterable[str], widths: list[int]) -> str:
+    padded = [str(value).ljust(widths[index]) for index, value in enumerate(values)]
+    return f"| {' | '.join(padded)} |"
+
+
+def _render_markdown_separator(widths: list[int]) -> str:
+    return f"| {' | '.join('-' * width for width in widths)} |"
+
+
+        
+        
+            
