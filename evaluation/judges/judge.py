@@ -128,6 +128,11 @@ class Judge(dspy.Module):
             signature) if self.predictor_type is not None else dspy.Predict(signature)
         predictor.set_lm(self.llm)  # type:ignore[arg-type]
         return predictor
+    
+    def _dynamically_update_signature_with_context(self, context):
+        for k in context.keys():
+            if k not in self.judge.signature.input_fields: # type:ignore
+                self.judge.signature=self.judge.signature.insert(1,k,dspy.InputField()) # type:ignore
 
     def _run_llm_judge(
         self,
@@ -139,9 +144,7 @@ class Judge(dspy.Module):
             return results
 
         # If context was not predefined in signature, add dynamically
-        for k in context.keys():
-            if k not in self.judge.signature.input_fields: # type:ignore
-                self.judge.signature.insert(1,k,dspy.InputField()) # type:ignore
+        self._dynamically_update_signature_with_context(context)
 
         prediction = self.judge(slides=slide_payload, **context)
         self._merge_llm_prediction(prediction, results)
@@ -155,6 +158,9 @@ class Judge(dspy.Module):
         results: MetricResultMap = {}
         if not (self.judge and self.judge_metrics):
             return results
+        
+        # If context was not predefined in signature, add dynamically
+        self._dynamically_update_signature_with_context(context)
 
         prediction = await self.judge.acall(slides=slide_payload, **context)
         self._merge_llm_prediction(prediction, results)
