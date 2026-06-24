@@ -1,5 +1,7 @@
 from typing import Any
 
+from pydantic import BaseModel
+
 from evaluation.types.assessment_types import BaseMetricType
 
 
@@ -87,13 +89,14 @@ def score_to_numeric(assessment: Any) -> float:
     return (float(score) - min_value) / (max_value - min_value)
 
 
-def normalize_metric(metric: BaseMetricType) -> dict[str, float | int]:
-    if isinstance(metric.score, str):
+def normalize_metric(metric: BaseModel) -> dict[str, float | int]:
+    score = getattr(metric,"score")
+    if isinstance(score, str):
         max_value = assessment_value(metric, "max")
-        positive = isinstance(max_value, str) and metric.score.lower() == max_value.lower()
+        positive = isinstance(max_value, str) and score.lower() == max_value.lower()
         return {"min": 0, "max": 1, "score": 1 if positive else 0}
 
-    if not isinstance(metric.score, (int, float)):
+    if not isinstance(score, (int, float)):
         raise ValueError("no correct value of `score`")
 
     numeric_min = to_float(assessment_value(metric, "min"))
@@ -101,7 +104,7 @@ def normalize_metric(metric: BaseMetricType) -> dict[str, float | int]:
     if numeric_min is None or numeric_max is None or numeric_max == numeric_min:
         raise ValueError("numeric `min` and `max` are required to normalize numeric `score`")
 
-    normalized_score = (float(metric.score) - numeric_min) / (numeric_max - numeric_min)
+    normalized_score = (float(score) - numeric_min) / (numeric_max - numeric_min)
     return {"min": 0, "max": 1, "score": normalized_score}
 
 

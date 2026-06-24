@@ -3,6 +3,7 @@ from typing import Any, Iterable, override
 
 import dspy
 from numpy import mean
+from pydantic import BaseModel
 
 from evaluation.lib.assessment_utils import (
     is_assessment_dict,
@@ -19,8 +20,10 @@ from evaluation.types.assessment_types import BaseMetricType
 class Evaluation(dspy.Prediction):
     """Container and rendering helpers for judge outputs."""
 
-    TABLE_COLUMNS = ("criterion", "score", "feedback", "scale", "description", "path")
-    TABLE_HEADERS = ("Criterion", "Score", "Feedback", "Scale", "Description", "Path")
+    TABLE_COLUMNS = ("criterion", "score", "feedback",
+                     "scale", "description", "path")
+    TABLE_HEADERS = ("Criterion", "Score", "Feedback",
+                     "Scale", "Description", "Path")
     DATAFRAME_PRIORITY_COLUMNS = (
         "criterion",
         "score",
@@ -32,8 +35,10 @@ class Evaluation(dspy.Prediction):
         "min",
         "max",
     )
-    DATAFRAME_REQUIRED_COLUMNS = frozenset({"path", "criterion", "description", "score", "feedback", "scale", "min", "max"})
-    DATAFRAME_ASSESSMENT_KEYS = ("criterion", "description", "score", "feedback", "scale", "min", "max")
+    DATAFRAME_REQUIRED_COLUMNS = frozenset(
+        {"path", "criterion", "description", "score", "feedback", "scale", "min", "max"})
+    DATAFRAME_ASSESSMENT_KEYS = (
+        "criterion", "description", "score", "feedback", "scale", "min", "max")
 
     # ---------------------------------------------------
     # Main Functionality
@@ -41,19 +46,18 @@ class Evaluation(dspy.Prediction):
     def __init__(self, results: dict[str, dict[str, dict[str, BaseDimension]]], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.results = results
-        print(results)
 
     def __repr__(self):
         return self.generate_assessment()
 
     @override
-    def __add__(self, other: Any) -> "Evaluation": # type: ignore
+    def __add__(self, other: Any) -> "Evaluation":  # type: ignore
         if not isinstance(other, Evaluation):
             return NotImplemented
         return Evaluation(results=self._deep_merge_results(self.results, other.results))
 
     @override
-    def __radd__(self, other: Any) -> "Evaluation": # type: ignore
+    def __radd__(self, other: Any) -> "Evaluation":  # type: ignore
         if other == 0:
             return self
         if not isinstance(other, Evaluation):
@@ -61,13 +65,12 @@ class Evaluation(dspy.Prediction):
         return other.__add__(self)
 
     @override
-    def keys(self,include_dspy=False) -> list[Any]:
+    def keys(self, include_dspy=False) -> list[Any]:
         return list(self.to_dict().keys())
-
 
     @override
     def get(self, key, default: Any | None = None, normalize=True) -> (Any | None):
-        return self.to_dict(normalize=normalize).get(key,default)
+        return self.to_dict(normalize=normalize).get(key, default)
 
     @classmethod
     def from_dataframe(cls, df):
@@ -77,18 +80,22 @@ class Evaluation(dspy.Prediction):
 
         missing = cls.DATAFRAME_REQUIRED_COLUMNS - set(df.columns)
         if missing:
-            raise ValueError(f"Missing required columns for from_dataframe(): {sorted(missing)}")
+            raise ValueError(
+                f"Missing required columns for from_dataframe(): {sorted(missing)}")
 
         results: dict[str, Any] = {}
         for idx, row in df.iterrows():
             raw_path = row.get("path")
             if not isinstance(raw_path, str):
-                raise ValueError(f"Row {idx} has invalid `path`. Expected dot-separated string.")
+                raise ValueError(
+                    f"Row {idx} has invalid `path`. Expected dot-separated string.")
             criterion = row.get("criterion")
             if not isinstance(criterion, str) or not criterion.strip():
-                raise ValueError(f"Row {idx} has invalid `criterion`. Expected non-empty string.")
+                raise ValueError(
+                    f"Row {idx} has invalid `criterion`. Expected non-empty string.")
 
-            parts = [part.strip() for part in raw_path.split(".") if part.strip()]
+            parts = [part.strip()
+                     for part in raw_path.split(".") if part.strip()]
             leaf_key = criterion.strip().replace(" ", "_")
             cursor = results
             for part in parts:
@@ -102,7 +109,8 @@ class Evaluation(dspy.Prediction):
                     )
                 cursor = node
 
-            cursor[leaf_key] = {key: row.get(key) for key in cls.DATAFRAME_ASSESSMENT_KEYS}
+            cursor[leaf_key] = {key: row.get(key)
+                                for key in cls.DATAFRAME_ASSESSMENT_KEYS}
 
         return cls(results=results)
 
@@ -128,7 +136,8 @@ class Evaluation(dspy.Prediction):
                 exclude_headers=exclude_headers,
             )
         )
-        total_score = self._compute_overall_score(rule_based_as_penalty=rule_based_as_penalty)
+        total_score = self._compute_overall_score(
+            rule_based_as_penalty=rule_based_as_penalty)
         return prefix + f"Total Score: {total_score:.4f}\n---\nDetails:\n{details}\n" + suffix
 
     def to_dict(self, exclude_positive_feedback: bool = False, normalize: bool = False):
@@ -156,7 +165,8 @@ class Evaluation(dspy.Prediction):
             normalize=normalize,
         )
 
-        rows: list[dict[str, Any]] = [{"criterion": criterion, **assessment} for criterion, assessment in serialized.items()]
+        rows: list[dict[str, Any]] = [
+            {"criterion": criterion, **assessment} for criterion, assessment in serialized.items()]
         if not rows:
             return pd.DataFrame(columns=self.DATAFRAME_PRIORITY_COLUMNS)
 
@@ -165,9 +175,12 @@ class Evaluation(dspy.Prediction):
             (column for column in df.columns if column.startswith("path_")),
             key=self._path_column_sort_key,
         )
-        ordered = [column for column in self.DATAFRAME_PRIORITY_COLUMNS if column in df.columns]
-        ordered.extend(column for column in path_columns if column not in ordered)
-        ordered.extend(column for column in df.columns if column not in ordered)
+        ordered = [
+            column for column in self.DATAFRAME_PRIORITY_COLUMNS if column in df.columns]
+        ordered.extend(
+            column for column in path_columns if column not in ordered)
+        ordered.extend(
+            column for column in df.columns if column not in ordered)
         return df.reindex(columns=ordered)
 
     def get_total_score(self, rule_based_as_penalty: bool = False) -> float:
@@ -175,7 +188,8 @@ class Evaluation(dspy.Prediction):
 
     def get_feedback(self, exclude_positive_feedback: bool = False, json_formatted: bool = False, md_header_level: int = 1) -> str:
         if json_formatted:
-            payload = self.to_dict(exclude_positive_feedback=exclude_positive_feedback)
+            payload = self.to_dict(
+                exclude_positive_feedback=exclude_positive_feedback)
             return json.dumps(payload, ensure_ascii=False, indent=2)
         return self._render_markdown_feedback_tree(
             exclude_positive_feedback=exclude_positive_feedback,
@@ -229,7 +243,8 @@ class Evaluation(dspy.Prediction):
             }
             if exclude_headers is not None:
                 excluded = {header.lower() for header in exclude_headers}
-                row = {key: value for key, value in row.items() if key.lower() not in excluded}
+                row = {key: value for key, value in row.items() if key.lower()
+                       not in excluded}
             rows.append(row)
         return self._render_feedback_rows(rows, exclude_positive_feedback, exclude_headers=exclude_headers)
 
@@ -263,11 +278,13 @@ class Evaluation(dspy.Prediction):
             return [self._render_feedback_rows(rows, exclude_positive_feedback, exclude_headers=exclude_headers)]
 
         if self._is_metric_assessment_map(data):
-            rows = self._rows_from_assessment_map(data, exclude_positive_feedback)
+            rows = self._rows_from_assessment_map(
+                data, exclude_positive_feedback)
             return [self._render_feedback_rows(rows, exclude_positive_feedback, exclude_headers=exclude_headers)]
 
         if is_assessment_dict(data):
-            rows = self._rows_from_assessment_map({"": data}, exclude_positive_feedback)
+            rows = self._rows_from_assessment_map(
+                {"": data}, exclude_positive_feedback)
             return [self._render_feedback_rows(rows, exclude_positive_feedback, exclude_headers=exclude_headers)]
 
         if not isinstance(data, dict):
@@ -339,7 +356,8 @@ class Evaluation(dspy.Prediction):
         return self._render_markdown_table(rows, exclude_headers=exclude_headers)
 
     def _render_markdown_table(self, rows: list[dict[str, Any]], exclude_headers: Iterable[str] | None = None) -> str:
-        excluded = {header.lower() for header in exclude_headers} if exclude_headers is not None else set()
+        excluded = {header.lower(
+        ) for header in exclude_headers} if exclude_headers is not None else set()
         included_columns: list[tuple[str, str]] = [
             (column, header)
             for column, header in zip(self.TABLE_COLUMNS, self.TABLE_HEADERS)
@@ -349,7 +367,8 @@ class Evaluation(dspy.Prediction):
             return "" if rows else "_No feedback entries._"
 
         escaped_rows = [
-            tuple(escape_markdown_cell(row.get(column, "")) for column, _ in included_columns)
+            tuple(escape_markdown_cell(row.get(column, ""))
+                  for column, _ in included_columns)
             for row in rows
         ]
         headers = tuple(header for _, header in included_columns)
@@ -405,21 +424,6 @@ class Evaluation(dspy.Prediction):
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
 
-        if isinstance(value, BaseMetricType):
-            if exclude_positive_feedback and is_positive_assessment(value):
-                return None
-            payload = {
-                **value.model_dump(),
-                "criterion": value.criterion,
-                "description": "",
-                "scale": getattr(value, "scale", None),
-                "min": getattr(value, "min", None),
-                "max": getattr(value, "max", None),
-            }
-            if normalize:
-                payload.update(normalize_metric(value))
-            return payload
-
         if isinstance(value, BaseDimension):
             out: dict[str, Any] = {}
             for key, field_info in value.__class__.model_fields.items():
@@ -430,11 +434,28 @@ class Evaluation(dspy.Prediction):
                 )
                 if converted is None:
                     continue
-                if isinstance(converted, dict) and isinstance(getattr(value, key, None), BaseMetricType):
+                if isinstance(converted, dict) and isinstance(getattr(value, key, None), BaseModel):
                     converted["criterion"] = converted.get("criterion") or key
                     converted["description"] = field_info.description or ""
                 out[key] = converted
             return out
+
+        if isinstance(value, BaseModel):
+            if exclude_positive_feedback and is_positive_assessment(value):
+                return None
+            payload = {
+                "criterion": getattr(value, "criterion", None),
+                "score": getattr(value, "score", None),
+                "scores": [s.model_dump() for s in getattr(value, "scores", [])],
+                "feedback": getattr(value, "feedback", None),
+                "description": getattr(value, "description", None),
+                "scale": getattr(value, "scale", None),
+                "min": getattr(value, "min", None),
+                "max": getattr(value, "max", None),
+            }
+            if normalize:
+                payload.update(normalize_metric(value))
+            return payload
 
         if isinstance(value, dict):
             out: dict[str, Any] = {}
@@ -447,32 +468,6 @@ class Evaluation(dspy.Prediction):
                 if converted is not None:
                     out[str(key)] = converted
             return out
-
-        if isinstance(value, (list, tuple)):
-            scores = []
-            feedbacks = []
-            for i,item in enumerate(value):
-                if item is not None:
-                    scores.append(item.score)
-                    feedbacks.append(f"{f"{i}."} {item.feedback}")
-            
-            if isinstance(value[0], BaseMetricType):
-                base = value[0]
-                payload = {
-                    "score" : float(mean(scores)),
-                    "feedback": "\n".join(feedbacks),
-                    "criterion": None,
-                    "description": getattr(base, "description", None),
-                    "scale": getattr(base, "scale", None),
-                    "min": getattr(base, "min", None),
-                    "max": getattr(base, "max", None),
-                    "scores" : scores,
-                    "feedbacks": feedbacks
-                }
-                if normalize:
-                    payload["score"] = (payload["score"] - payload["min"]) / payload["max"]
-                return payload
-            return {}
 
         if hasattr(value, "model_dump") and callable(value.model_dump):
             return self._serialize_to_plain_dict(
@@ -500,7 +495,8 @@ class Evaluation(dspy.Prediction):
         try:
             import pandas as pd
         except ImportError as exc:
-            raise ImportError(f"`pandas` is required for `{caller}()`. Install it with `pip install pandas`.") from exc
+            raise ImportError(
+                f"`pandas` is required for `{caller}()`. Install it with `pip install pandas`.") from exc
         return pd
 
     @classmethod
@@ -509,7 +505,8 @@ class Evaluation(dspy.Prediction):
             merged = dict(left)
             for key, right_value in right.items():
                 if key in merged:
-                    merged[key] = cls._deep_merge_results(merged[key], right_value)
+                    merged[key] = cls._deep_merge_results(
+                        merged[key], right_value)
                 else:
                     merged[key] = right_value
             return merged
