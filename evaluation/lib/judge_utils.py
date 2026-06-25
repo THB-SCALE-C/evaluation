@@ -1,8 +1,6 @@
 from typing import Any, ClassVar, TypeAlias, get_origin
 import dspy
 from evaluation.dimensions.base import BaseDimension
-from evaluation.types.assessment_types import BaseMetricType
-
 
 MetricResultMap: TypeAlias = dict[str, dict[str, Any]]
 JudgeMetricSpec: TypeAlias = tuple[str, Any, type[BaseDimension]]
@@ -16,7 +14,7 @@ def store_metric_result(results: MetricResultMap, metric_result: BaseDimension) 
         metric_bucket[metric_result.metric_name] = metric_result
         return
 
-    slide_key = f"slide-{metric_result.index_}-{metric_result.metric_name}"
+    slide_key = f"slide-{metric_result.index}-{metric_result.metric_name}"
     slide_bucket = results.setdefault("slide_level", {})
     slide_bucket[slide_key] = metric_result
 

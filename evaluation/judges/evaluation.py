@@ -1,10 +1,6 @@
-import json
 from typing import Any, Iterable, override
 import dspy
 import numpy as np
-from pydantic import BaseModel
-from evaluation.dimensions.rule_based import BaseRuleDimension
-from evaluation.dimensions.base import BaseDimension
 from evaluation.types.assessment_types import BaseMetricType
 
 PATH_DELIMITER = "."
@@ -19,7 +15,7 @@ def _flatten_results(results: dict[str, dict[str, dict]], path_delimiter: str = 
                     continue
                 key = f"{path_0}{path_delimiter}{path_1}{path_delimiter}{path_2}"
                 metric._criterion = key
-                metric._is_llm_judge = val_1.get("is_llm_judge",False)
+                metric._is_llm_judge = val_1.get("is_llm_judge", False)
                 _flattened.append(metric)
     return _flattened
 
@@ -35,7 +31,9 @@ class Evaluation(dspy.Prediction):
             results, path_delimiter=PATH_DELIMITER)
 
     def __repr__(self):
-        return NotImplemented
+        score = self.total_score()
+        details = self.to_markdown_table(normalize=True)
+        return f"Score: {score*100}/100\n\nDetails:\n{details}"
 
     @override
     def __add__(self, other: Any) -> "Evaluation":  # type: ignore
@@ -59,8 +57,18 @@ class Evaluation(dspy.Prediction):
     def get(self, key, default: Any | None = None, normalize=True) -> (Any | None):
         return self.to_dict(normalize=normalize).get(key, default)
 
-    def total_score(self, penalties:list[str]=[]) -> float:
-        # todo: provide a doc string that explains the usage
+    def total_score(self, penalties: list[str] = []) -> float:
+        """
+        Return the mean normalized score across all flattened metrics.
+
+        Use `penalties` to define failing criteria that force the total score
+        to `0.0` when a matched metric receives its minimum score.
+
+        Penalty matching rules:
+        - exact match: `"section.subsection.metric"`
+        - suffix wildcard: `"section.subsection.*"`
+        - prefix wildcard: `"*.metric"`
+        """
         for penalty in penalties:
             for metric in self._flattened_results:
                 if penalty.endswith("*"):
@@ -69,12 +77,12 @@ class Evaluation(dspy.Prediction):
                     penalized = penalty.removeprefix("*") in metric.criterion
                 else:
                     penalized = metric.criterion == penalty
-                if penalized and metric.score == metric.min: # type:ignore
+                if penalized and metric.score == metric.min:  # type:ignore
                     return 0.0
         scores = [_normalize_score(val) for val in self._flattened_results]
         return float(np.mean(scores))
-    
-    def to_markdown_table(self, exclude_positive:bool=False, normalize:bool=False, columns=[
+
+    def to_markdown_table(self, exclude_positive: bool = False, normalize: bool = False, columns=[
         "level_1",
         "level_2",
         "metric",
@@ -113,9 +121,10 @@ class Evaluation(dspy.Prediction):
             header is still returned so the caller gets a valid empty table.
         """
         rows = [
-            _metric_to_markdown_row(metric, columns=columns, normalize=normalize)
+            _metric_to_markdown_row(
+                metric, columns=columns, normalize=normalize)
             for metric in self._flattened_results
-            if not exclude_positive or metric.score != metric.max # type:ignore
+            if not exclude_positive or metric.score != metric.max  # type:ignore
         ]
         widths = _compute_markdown_widths(columns, rows)
         header = _render_markdown_row(columns, widths)
@@ -123,17 +132,30 @@ class Evaluation(dspy.Prediction):
         body = [_render_markdown_row(row, widths) for row in rows]
         return "\n".join([header, separator, *body])
 
-
-def _normalize_score(val:BaseMetricType) -> float:
-    denominator = val.max - val.min
-    if denominator == 0:
-        return 0.0
-    return (val.score - val.min) / denominator #type:ignore
+    @classmethod
+    def _deep_merge_results(cls, left: Any, right: Any) -> Any:
+        if isinstance(left, dict) and isinstance(right, dict):
+            merged = dict(left)
+            for key, right_value in right.items():
+                if key in merged:
+                    merged[key] = cls._deep_merge_results(
+                        merged[key], right_value)
+                else:
+                    merged[key] = right_value
+            return merged
+        return right
 
 
 # ---------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------
+def _normalize_score(val: BaseMetricType) -> float:
+    denominator = val.max - val.min
+    if denominator == 0:
+        return 0.0
+    return (val.score - val.min) / denominator  # type:ignore
+
+
 def _metric_to_markdown_row(
     metric: BaseMetricType,
     columns: Iterable[str],
@@ -142,7 +164,8 @@ def _metric_to_markdown_row(
     criterion_parts = _split_criterion(metric.criterion)
     row: list[str] = []
     for column in columns:
-        row.append(_stringify_markdown_value(metric, column, criterion_parts, normalize))
+        row.append(_stringify_markdown_value(
+            metric, column, criterion_parts, normalize))
     return row
 
 
@@ -176,7 +199,7 @@ def _resolve_metric_column(
     if column == "metric":
         return criterion_parts[2]
     if column == "score":
-        return _normalize_score(metric) if normalize else metric.score # type:ignore
+        return _normalize_score(metric) if normalize else metric.score# type:ignore
     if column == "description":
         return _metric_description(metric)
     if column == "scale":
@@ -215,14 +238,10 @@ def _compute_markdown_widths(columns: Iterable[str], rows: list[list[str]]) -> l
 
 
 def _render_markdown_row(values: Iterable[str], widths: list[int]) -> str:
-    padded = [str(value).ljust(widths[index]) for index, value in enumerate(values)]
+    padded = [str(value).ljust(widths[index])
+              for index, value in enumerate(values)]
     return f"| {' | '.join(padded)} |"
 
 
 def _render_markdown_separator(widths: list[int]) -> str:
     return f"| {' | '.join('-' * width for width in widths)} |"
-
-
-        
-        
-            

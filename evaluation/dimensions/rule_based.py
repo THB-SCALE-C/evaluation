@@ -49,14 +49,14 @@ class BaseRuleDimension[T]():
                     feedback=feedback
                 )
         fields = {key: BaseMetricType for key in evals.keys()} \
-            | {"metric_name": (ClassVar, self.metric_name), "required_slide_type":(ClassVar, self.required_slide_type),
-               "index_":int|None}
+            | {"metric_name": (ClassVar, self.metric_name), "required_slide_type":(ClassVar, self.required_slide_type)}
         model = pydantic.create_model(
             self.__class__.__name__,
             __base__=BaseDimension,
               **fields)  # type:ignore
-        evals["index_"] = index
-        return model(**evals)
+        instance = model(**evals)
+        instance._index = index
+        return instance
 
 
     def check(self, data: T) -> Tuple[Any, str]: #type:ignore

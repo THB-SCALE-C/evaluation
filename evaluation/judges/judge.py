@@ -1,3 +1,4 @@
+from inspect import isclass
 from typing import Any, cast
 
 import dspy
@@ -128,10 +129,14 @@ class Judge(dspy.Module):
         predictor.set_lm(self.llm)  # type:ignore[arg-type]
         return predictor
     
-    def _dynamically_update_signature_with_context(self, context):
-        for k in context.keys():
-            if k not in self.judge.signature.input_fields: # type:ignore
-                self.judge.signature=self.judge.signature.insert(1,k,dspy.InputField()) # type:ignore
+    def _dynamically_update_signature_with_context(self, context) -> type[dspy.Signature]:
+        if self.judge is None or not isclass(self.judge.signature) or not issubclass(self.judge.signature, dspy.Signature):
+            raise ValueError()
+        else:
+            for k in context.keys():
+                if k not in self.judge.signature.input_fields:
+                    self.judge.signature=self.judge.signature.insert(1,k,dspy.InputField()) # type:ignore
+            return self.judge.signature
 
     def _run_llm_judge(
         self,
@@ -143,10 +148,10 @@ class Judge(dspy.Module):
             return results
 
         # If context was not predefined in signature, add dynamically
-        self._dynamically_update_signature_with_context(context)
+        self.judge.signature = self._dynamically_update_signature_with_context(context) # type:ignore
 
         prediction = self.judge(slides=slide_payload, **context)
-        self._merge_llm_prediction(prediction, results)
+        results = self._merge_llm_prediction(prediction, results)
         return results
 
     async def _run_llm_judge_async(
@@ -159,17 +164,21 @@ class Judge(dspy.Module):
             return results
         
         # If context was not predefined in signature, add dynamically
-        self._dynamically_update_signature_with_context(context)
+        self.judge.signature = self._dynamically_update_signature_with_context(context) # type:ignore
 
         prediction = await self.judge.acall(slides=slide_payload, **context)
-        self._merge_llm_prediction(prediction, results)
+        results = self._merge_llm_prediction(prediction, results)
         return results
 
     def _merge_llm_prediction(
         self,
         result: dspy.Prediction,
         processed_results: MetricResultMap,
-    ) -> None:
+    ) -> MetricResultMap:
+        merged_results: MetricResultMap = {
+            level: scope_map.copy() for level, scope_map in processed_results.items()
+        }
+
         if self.reduce_to_signature_level:
             metric_results = restore_metrics_from_signature(
                 prediction=result,
@@ -184,7 +193,8 @@ class Judge(dspy.Module):
                     metric_results.append(metric_result)
 
         for metric_result in metric_results:
-            store_metric_result(processed_results, metric_result)
+            store_metric_result(merged_results, metric_result)
+        return merged_results
 
     def _run_rule_based_metrics(self, slides: list[BaseComponent]) -> MetricResultMap:
         processed_results: MetricResultMap = {}
