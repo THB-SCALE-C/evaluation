@@ -1,5 +1,5 @@
 from inspect import isclass
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 import dspy
 from creator.schemas.base import BaseComponent
@@ -32,9 +32,11 @@ class Judge(dspy.Module):
         llm_as_a_judge_metrics: list[type[BaseDimension]] = [],
         rule_based_metrics: list[type[BaseRuleDimension]] = [],
         base_signature: type[dspy.Signature] | None = None,
+        instructions:str|None = None,
         predictor_type: type[dspy.Module] | None = None,
         reduce_to_signature_level: bool = False,
         omit_signature_prefix: bool = False,
+        input_transformer_func:None|Callable[[list[BaseComponent]],list[BaseComponent]] = None
     ):
         """Initialize a judge that combines LLM and rule-based dimension metrics.
 
@@ -44,12 +46,16 @@ class Judge(dspy.Module):
             llm_as_a_judge_metrics: dimension classes evaluated by the LLM.
             rule_based_metrics: dimension classes evaluated with deterministic rules.
             base_signature: Optional base DSPy signature. Defaults to `Judgement`.
+            instructions: Optional string that overrides the current signatures doc 
+                and therefore instructions.
             predictor_type: Optional predictor class (for example `dspy.ChainOfThought`).
                 Defaults to `dspy.Predict`.
             reduce_to_signature_level: If true, flattens dimension fields into individual
                 signature outputs and restores dimension models from prediction output.
             omit_signature_prefix: When flattening dimension fields, omit metric-name
                 prefixes for output fields.
+            input_transformer_func: Optional function that takes slides as an argument 
+                and returns transformed slides. This is useful when a specific judge only depends on certain slides or values as input.
         """
         super().__init__()
         self.llm_as_a_judge_metrics = llm_as_a_judge_metrics
@@ -58,8 +64,10 @@ class Judge(dspy.Module):
         self.llm = llm
         self.predictor_type = predictor_type
         self.omit_signature_prefix = omit_signature_prefix
+        self.input_transformer_func = input_transformer_func
 
         self.base_signature = base_signature
+        self.instructions = instructions
         self.judge_metrics: list[JudgeMetricSpec] = []
         self._dimension_models_by_name: dict[str, type[BaseDimension]] = {}
         self._collect_llm_metrics()
@@ -70,6 +78,8 @@ class Judge(dspy.Module):
         self._initialize_llm_judge()
 
     def forward(self, slides: list[BaseComponent], **context: Any) -> Evaluation:
+        if self.input_transformer_func:
+            slides = self.input_transformer_func(slides)
         slide_payload = [slide.model_dump() for slide in slides]
         llm_results = self._run_llm_judge(slide_payload, context)
         rule_results = self._run_rule_based_metrics(slides)
@@ -77,6 +87,8 @@ class Judge(dspy.Module):
         return Evaluation(results)
 
     async def aforward(self, slides: list[BaseComponent], **context: Any) -> Evaluation:
+        if self.input_transformer_func:
+            slides = self.input_transformer_func(slides)
         slide_payload = [slide.model_dump() for slide in slides]
         llm_results = await self._run_llm_judge_async(slide_payload, context)
         rule_results = self._run_rule_based_metrics(slides)
@@ -91,6 +103,8 @@ class Judge(dspy.Module):
     # ---------------------------------------------------
     def _build_signature(self) -> type[dspy.Signature]:
         signature = self.base_signature if self.base_signature is not None else Judgement
+        if self.instructions:
+            signature.__doc__ = self.instructions
         if self.reduce_to_signature_level:
             signature, self._flattened_metric_map = reduce_signature_to_metric_fields(
                 signature=signature,
