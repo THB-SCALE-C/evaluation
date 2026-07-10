@@ -77,19 +77,24 @@ class Judge(dspy.Module):
         self.judgement = self._build_signature()
         self._initialize_llm_judge()
 
-    def forward(self, slides: list[BaseComponent], **context: Any) -> Evaluation:
+    def _prepare_forward(self, slides: list[BaseComponent], **context: Any):
         if self.input_transformer_func:
             slides = self.input_transformer_func(slides)
+        self.judgement = self._build_signature()
+        self.judgement = self._dynamically_update_signature_with_context(self.judgement, context)
+        self._initialize_llm_judge()
         slide_payload = [slide.model_dump() for slide in slides]
+        return slide_payload
+
+    def forward(self, slides: list[BaseComponent], **context: Any) -> Evaluation:
+        slide_payload = self._prepare_forward(slides, **context)
         llm_results = self._run_llm_judge(slide_payload, context)
         rule_results = self._run_rule_based_metrics(slides)
         results = merge_metric_results(llm_results, rule_results)
         return Evaluation(results)
 
     async def aforward(self, slides: list[BaseComponent], **context: Any) -> Evaluation:
-        if self.input_transformer_func:
-            slides = self.input_transformer_func(slides)
-        slide_payload = [slide.model_dump() for slide in slides]
+        slide_payload = self._prepare_forward(slides, **context)
         llm_results = await self._run_llm_judge_async(slide_payload, context)
         rule_results = self._run_rule_based_metrics(slides)
         results = merge_metric_results(llm_results, rule_results)
@@ -143,14 +148,11 @@ class Judge(dspy.Module):
         predictor.set_lm(self.llm)  # type:ignore[arg-type]
         return predictor
     
-    def _dynamically_update_signature_with_context(self, context) -> type[dspy.Signature]:
-        if self.judge is None or not isclass(self.judge.signature) or not issubclass(self.judge.signature, dspy.Signature):
-            raise ValueError()
-        else:
-            for k in context.keys():
-                if k not in self.judge.signature.input_fields:
-                    self.judge.signature=self.judge.signature.insert(1,k,dspy.InputField()) # type:ignore
-            return self.judge.signature
+    def _dynamically_update_signature_with_context(self, signature, context) -> type[dspy.Signature]:
+        for k in context.keys():
+            if k not in signature.input_fields:
+                signature=signature.insert(1,k,dspy.InputField()) # type:ignore
+        return signature
 
     def _run_llm_judge(
         self,
