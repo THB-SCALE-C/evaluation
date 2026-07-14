@@ -27,18 +27,18 @@ class BaseRuleDimension[T]():
     required_slide_type:ClassVar = ""
     is_llm_judge = False
 
-    def __new__(cls, data: T, index:int|None =None) -> BaseMetricType:
+    def __new__(cls, data: T, index:int|None =None, **context) -> BaseMetricType:
         return super().__new__(cls)._evaluate(data,index)
 
     
-    def _evaluate(self,data:T,index:int|None =None) -> Any:
+    def _evaluate(self,data:T,index:int|None =None, **context) -> Any:
         evals = dict()
         for key in self.__dir__():
             if key.startswith("_") or key == "evaluate":
                 continue
             func = getattr(self, key)
             if inspect.ismethod(func) and not func.__name__.startswith("_"):
-                res = func(data)
+                res = func(data,**context)
                 if not res:
                     continue
                 checked, feedback = res
@@ -59,5 +59,5 @@ class BaseRuleDimension[T]():
         return instance
 
 
-    def check(self, data: T) -> Tuple[Any, str]: #type:ignore
+    def check(self, data: T, **context) -> Tuple[Any, str]: #type:ignore
         pass

@@ -1,22 +1,21 @@
 from typing import Any, Iterable, override
 import dspy
+from evaluation.dimensions.base import BaseDimension
 import numpy as np
 from evaluation.types.assessment_types import BaseMetricType
 
 PATH_DELIMITER = "."
 
 
-def _flatten_results(results: dict[str, dict[str, dict]], path_delimiter: str = "%"):
+def _flatten_results(results: dict[str, BaseDimension|dict], path_delimiter: str = "%"):
     _flattened: list[BaseMetricType] = []
-    for path_0, val_0 in results.items():
-        for path_1, val_1 in val_0.items():
-            for path_2, metric in dict(val_1).items():
-                if not isinstance(metric, BaseMetricType):
-                    continue
-                key = f"{path_0}{path_delimiter}{path_1}{path_delimiter}{path_2}"
-                metric._criterion = key
-                metric._is_llm_judge = val_1.get("is_llm_judge", False)
-                _flattened.append(metric)
+    for dimension_name, dimension_value in results.items():
+        for metric_name, metric_value in dict(dimension_value).items():
+            if not isinstance(metric_value, BaseMetricType):
+                continue
+            key = f"{dimension_name}{path_delimiter}{metric_name}"
+            metric_value._criterion = key
+            _flattened.append(metric_value)
     return _flattened
 
 
@@ -24,7 +23,7 @@ class Evaluation(dspy.Prediction):
     # ---------------------------------------------------
     # Main Functionality
     # ---------------------------------------------------
-    def __init__(self, results: dict[str, dict[str, Any]], *args, **kwargs):
+    def __init__(self, results: dict[str, BaseDimension|dict], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.results = results
         self._flattened_results = _flatten_results(
@@ -57,6 +56,9 @@ class Evaluation(dspy.Prediction):
     def get(self, key, default: Any | None = None, normalize=True) -> (Any | None):
         return self.to_dict(normalize=normalize).get(key, default)
 
+    def to_dict(self) -> dict:
+        pass
+
     def total_score(self, penalties: list[str] = []) -> float:
         """
         Return the mean normalized score across all flattened metrics.
@@ -83,8 +85,7 @@ class Evaluation(dspy.Prediction):
         return float(np.mean(scores))
 
     def to_markdown_table(self, exclude_positive: bool = False, normalize: bool = False, columns=[
-        "level_1",
-        "level_2",
+        "dimension",
         "metric",
         "score",
         "feedback",
@@ -107,7 +108,7 @@ class Evaluation(dspy.Prediction):
           `metric.max`, so only non-perfect results remain in the output.
 
         Supported columns are:
-        - `level_1`, `level_2`, `metric`: derived from the flattened
+        - `dimension`, `metric`: derived from the flattened
           `criterion` path split by `PATH_DELIMITER`.
         - `score`: raw or normalized score depending on `normalize`.
         - `feedback`: metric feedback.
@@ -192,12 +193,10 @@ def _resolve_metric_column(
     criterion_parts: list[str],
     normalize: bool,
 ) -> Any:
-    if column == "level_1":
+    if column == "dimension":
         return criterion_parts[0]
-    if column == "level_2":
-        return criterion_parts[1]
     if column == "metric":
-        return criterion_parts[2]
+        return criterion_parts[1]
     if column == "score":
         return _normalize_score(metric) if normalize else metric.score# type:ignore
     if column == "description":

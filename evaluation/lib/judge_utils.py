@@ -1,32 +1,24 @@
 from typing import Any, ClassVar, TypeAlias, get_origin
 import dspy
 from evaluation.dimensions.base import BaseDimension
+from evaluation.types.assessment_types import BaseMetricType
 
-MetricResultMap: TypeAlias = dict[str, dict[str, Any]]
+MetricResultMap: TypeAlias = dict[str, BaseDimension|dict]
 JudgeMetricSpec: TypeAlias = tuple[str, Any, type[BaseDimension]]
 FlattenedMetricMap: TypeAlias = dict[str, tuple[str, str]]
 
 
 
 def store_metric_result(results: MetricResultMap, metric_result: BaseDimension) -> None:
-    if not metric_result.required_slide_type:
-        metric_bucket = results.setdefault("unit_level", {})
-        metric_bucket[metric_result.metric_name] = metric_result
-        return
-
-    slide_key = f"slide-{metric_result.index}-{metric_result.metric_name}"
-    slide_bucket = results.setdefault("slide_level", {})
-    slide_bucket[slide_key] = metric_result
+    results[metric_result.metric_name] = metric_result
 
 
 def merge_metric_results(*result_maps: MetricResultMap) -> MetricResultMap:
     merged: MetricResultMap = {}
 
     for result_map in result_maps:
-        for level, scope_map in result_map.items():
-            merged_scope_map = merged.setdefault(level, {})
-            for scope_key, metrics in scope_map.items():
-                merged_scope_map.setdefault(scope_key, {}).update(metrics)
+        for scope_key, metrics in result_map.items():
+            merged.setdefault(scope_key, {}).update(metrics)
 
     return merged
 
@@ -84,7 +76,7 @@ def reduce_signature_to_metric_fields(
 
             signature = signature.append(
                 output_name,
-                dspy.OutputField(desc=field_info.description) or dspy.OutputField(),
+                dspy.OutputField(desc=field_info.description) if field_info.description else dspy.OutputField(),
                 field_info.annotation,
             )
             flattened_fields[output_name] = (metric_name, field_name)
