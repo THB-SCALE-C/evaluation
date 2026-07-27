@@ -40,7 +40,7 @@ class LLMJudge(_BaseJudge):
         predictor_type: type[dspy.Module] | None = None,
         reduce_to_signature_level: bool = False,
         omit_signature_prefix: bool = False,
-        input_transformer_func:None|Callable[[list[BaseComponent]],list[BaseComponent]] = None
+        input_transformer_func:None|Callable[[list[BaseComponent]],list[BaseComponent|Any]] = None
     ):
         """Initialize a judge that combines LLM and rule-based dimension metrics.
 
@@ -101,7 +101,7 @@ class LLMJudge(_BaseJudge):
         self.judgement = self._build_signature()
         self.judgement = self._dynamically_update_signature_with_context(self.judgement, context)
         self._initialize_llm_judge()
-        slide_payload = [slide.model_dump() for slide in slides]
+        slide_payload = [slide.model_dump() if hasattr(slide, "model_dump") else slide for slide in slides]
         return slide_payload
     
     def _build_signature(self) -> type[dspy.Signature]:
