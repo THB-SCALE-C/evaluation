@@ -10,7 +10,6 @@ from evaluation.lib.judge_utils import (
     merge_metric_results,
     reduce_signature_to_metric_fields,
     restore_metrics_from_signature,
-    sort_slide_level_results,
     store_metric_result,
 )
 from evaluation.dimensions import BaseDimension, BaseRuleDimension
@@ -122,9 +121,9 @@ class LLMJudge(_BaseJudge):
     def _collect_llm_metrics(self) -> None:
         for metric in self.llm_as_a_judge_metrics:
             llm_metric = cast(type[BaseDimension], metric)
-            self._dimension_models_by_name[llm_metric.metric_name] = llm_metric
+            self._dimension_models_by_name[llm_metric.dimension_name] = llm_metric
             self.judge_metrics.append(
-                (llm_metric.metric_name, dspy.OutputField(
+                (llm_metric.dimension_name, dspy.OutputField(
                     desc=llm_metric.__doc__), llm_metric)
             )
 

@@ -23,7 +23,7 @@ class BaseRuleDimension[T]():
         return not (to_many or to_few), feedback```
     """
     metric_type: ClassVar = BinaryMetricType
-    metric_name: ClassVar[str] = ""
+    dimension_name: ClassVar[str] = ""
     required_slide_type:ClassVar = ""
     is_llm_judge = False
 
@@ -49,7 +49,7 @@ class BaseRuleDimension[T]():
                     feedback=feedback
                 )
         fields = {key: BaseMetricType for key in evals.keys()} \
-            | {"metric_name": (ClassVar, self.metric_name), "required_slide_type":(ClassVar, self.required_slide_type)}
+            | {"dimension_name": (ClassVar, self.dimension_name), "required_slide_type":(ClassVar, self.required_slide_type)}
         model = pydantic.create_model(
             self.__class__.__name__,
             __base__=BaseDimension,

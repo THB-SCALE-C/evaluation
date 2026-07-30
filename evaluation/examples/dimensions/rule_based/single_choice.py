@@ -5,7 +5,7 @@ from evaluation.dimensions import BaseRuleDimension
 
 
 class SingleChoiceRuleBased(BaseRuleDimension[SingleChoice]):
-    metric_name: ClassVar = "single_choice"
+    dimension_name: ClassVar = "single_choice"
     metric_type: ClassVar = "rule_based"
     required_slide_type: ClassVar = "single_choice"
 

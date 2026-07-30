@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 
 class BaseDimension(BaseModel):
-    metric_name:ClassVar[str] = ""
+    dimension_name:ClassVar[str] = ""
     metric_type:ClassVar[Any|None] = None
     required_slide_type:ClassVar[str|None] = None
     is_llm_judge:ClassVar = False

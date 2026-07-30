@@ -5,7 +5,7 @@ from creator.schemas.simple import Text
 from evaluation.dimensions import BaseRuleDimension
 
 class TextRuleBased(BaseRuleDimension[Text]):
-    metric_name: ClassVar = "text"
+    dimension_name: ClassVar = "text"
     required_slide_type: ClassVar = "text"
 
     def check_text_has_any_character(self, data: Text) -> Tuple[bool, str]:

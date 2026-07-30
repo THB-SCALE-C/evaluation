@@ -6,7 +6,7 @@ from evaluation.dimensions import BaseRuleDimension
 
 
 class UnitConsistency(BaseRuleDimension[list[Text | DragText | SingleChoice]]):
-    metric_name: ClassVar = "unit_consistency"
+    dimension_name: ClassVar = "unit_consistency"
     metric_type: ClassVar = "rule_based"
     required_slide_type: ClassVar = None
 

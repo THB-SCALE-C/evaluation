@@ -1,14 +1,14 @@
-from typing import Any, ClassVar, Literal, Optional
+from typing import Any, ClassVar, Literal, Optional, Tuple
 from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 
 class BaseMetricType(BaseModel):
     _criterion:str = PrivateAttr(default="")
-    _is_llm_judge:bool = PrivateAttr(default=False)
-    type: ClassVar[str]
-    scale: ClassVar[tuple]
-    max: ClassVar[int]
-    min: ClassVar[int]
+    _meta: dict[str, Any] = PrivateAttr(default_factory=dict)
+    type: ClassVar[str|None] = None
+    scale: ClassVar[Tuple|None] = None
+    max: ClassVar[int|None] = None
+    min: ClassVar[int|None] = None
 
 
     @computed_field
@@ -18,7 +18,15 @@ class BaseMetricType(BaseModel):
     @computed_field
     @property
     def is_llm_judge(self) -> bool:
-        return self._is_llm_judge
+        return bool(self._meta.get("is_llm_judge", False))
+    @computed_field
+    @property
+    def description(self) -> str:
+        return str(self._meta.get("description", ""))
+    @computed_field
+    @property
+    def meta(self) -> dict:
+        return self._meta
 
 class BinaryMetricType(BaseMetricType):
     type: ClassVar[str] = "binary"

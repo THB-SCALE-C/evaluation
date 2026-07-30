@@ -10,7 +10,8 @@ FlattenedMetricMap: TypeAlias = dict[str, tuple[str, str]]
 
 
 def store_metric_result(results: MetricResultMap, metric_result: BaseDimension) -> None:
-    results[metric_result.metric_name] = metric_result
+    _attach_dimension_field_metadata(metric_result)
+    results[metric_result.dimension_name] = metric_result
 
 
 def merge_metric_results(*result_maps: MetricResultMap) -> MetricResultMap:
@@ -23,11 +24,6 @@ def merge_metric_results(*result_maps: MetricResultMap) -> MetricResultMap:
     return merged
 
 
-def sort_slide_level_results(results: MetricResultMap) -> None:
-    slide_level = results.get("slide_level")
-    if not slide_level:
-        return
-    results["slide_level"] = {key: slide_level[key] for key in sorted(slide_level)}
 
 
 def restore_metrics_from_signature(
@@ -35,20 +31,22 @@ def restore_metrics_from_signature(
     metric_map: FlattenedMetricMap,
     dimension_models: dict[str, type[BaseDimension]],
 ) -> list[BaseDimension]:
-    payload_by_metric: dict[str, dict[str, Any]] = {}
+    payload_by_dimension: dict[str, dict[str, Any]] = {}
 
     for output_name, value in prediction.toDict().items():
         mapped = metric_map.get(output_name)
         if not mapped:
             continue
-        metric_name, field_name = mapped
-        payload_by_metric.setdefault(metric_name, {})[field_name] = value
+        dimension_name, field_name = mapped
+        payload_by_dimension.setdefault(dimension_name, {})[field_name] = value
 
     restored: list[BaseDimension] = []
-    for metric_name, payload in payload_by_metric.items():
-        dimension_model = dimension_models.get(metric_name)
+    for dimension_name, payload in payload_by_dimension.items():
+        dimension_model = dimension_models.get(dimension_name)
         if dimension_model:
-            restored.append(dimension_model(**payload))
+            restored_metric = dimension_model(**payload)
+            _attach_dimension_field_metadata(restored_metric)
+            restored.append(restored_metric)
     return restored
 
 
@@ -62,16 +60,16 @@ def reduce_signature_to_metric_fields(
 ) -> tuple[Any, FlattenedMetricMap]:
     flattened_fields: FlattenedMetricMap = {}
 
-    for metric_name, _, dimension in judge_metrics:
+    for dimension_name, _, dimension in judge_metrics:
         for field_name, field_info in dimension.model_fields.items():
             if get_origin(field_info.annotation) is ClassVar:
                 continue
             if not field_info.is_required():
                 continue
 
-            output_name = field_name if omit_signature_prefix else f"{metric_name}_{field_name}"
+            output_name = field_name if omit_signature_prefix else f"{dimension_name}_{field_name}"
             if output_name in flattened_fields:
-                flattened_fields[output_name] = (metric_name, field_name)
+                flattened_fields[output_name] = (dimension_name, field_name)
                 continue
 
             signature = signature.append(
@@ -79,6 +77,27 @@ def reduce_signature_to_metric_fields(
                 dspy.OutputField(desc=field_info.description) if field_info.description else dspy.OutputField(),
                 field_info.annotation,
             )
-            flattened_fields[output_name] = (metric_name, field_name)
+            flattened_fields[output_name] = (dimension_name, field_name)
 
     return signature, flattened_fields
+
+
+# ---------------------------------------------------
+# Helper Functions
+# ---------------------------------------------------
+def _attach_dimension_field_metadata(metric_result: BaseDimension) -> None:
+    for field_name, field_info in metric_result.__class__.model_fields.items():
+        metric_value = getattr(metric_result, field_name, None)
+        if not isinstance(metric_value, BaseMetricType):
+            continue
+        metric_value._meta = _build_metric_meta(
+            metric_result=metric_result,
+            field_info=field_info,
+        )
+
+
+def _build_metric_meta(metric_result: BaseDimension, field_info: Any) -> dict[str, Any]:
+    meta = dict(field_info.json_schema_extra or {})
+    meta["description"] = field_info.description or ""
+    meta["is_llm_judge"] = bool(getattr(metric_result.__class__, "is_llm_judge", False))
+    return meta

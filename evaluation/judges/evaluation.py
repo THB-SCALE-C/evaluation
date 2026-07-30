@@ -1,4 +1,4 @@
-from typing import Any, Iterable, override
+from typing import Any, Iterable, Sequence, override
 import dspy
 from evaluation.dimensions.base import BaseDimension
 import numpy as np
@@ -48,16 +48,16 @@ class Evaluation(dspy.Prediction):
             return NotImplemented
         return other.__add__(self)
 
-    @override
-    def keys(self, include_dspy=False) -> list[Any]:
+    # @override
+    def keys(self) -> list[Any]:
         return list(self.to_dict().keys())
 
-    @override
+    # @override
     def get(self, key, default: Any | None = None, normalize=True) -> (Any | None):
         return self.to_dict(normalize=normalize).get(key, default)
 
-    def to_dict(self) -> dict:
-        pass
+    def to_dict(self, normalize:bool=True) -> dict:
+        return {e.criterion:e.model_dump() for e in self._flattened_results}
 
     def total_score(self, penalties: list[str] = []) -> float:
         """
@@ -84,15 +84,12 @@ class Evaluation(dspy.Prediction):
         scores = [_normalize_score(val) for val in self._flattened_results]
         return float(np.mean(scores))
 
-    def to_markdown_table(self, exclude_positive: bool = False, normalize: bool = False, columns=[
-        "dimension",
-        "metric",
-        "score",
-        "feedback",
-        "description",
-        "scale",
-        "is_llm_judge"
-    ]) -> str:
+    def to_markdown_table(
+        self,
+        exclude_positive: bool = False,
+        normalize: bool = False,
+        columns: Sequence[str] | None = None,
+    ) -> str:
         """
         Render flattened evaluation metrics as a markdown table.
 
@@ -100,6 +97,7 @@ class Evaluation(dspy.Prediction):
         implementation intentionally simple and fast:
 
         - `columns` fully defines which columns are included and in which order.
+          When `columns=None`, all available columns are included.
         - Column widths are computed dynamically from the header and rendered
           cell values so the markdown output stays aligned and readable.
         - `normalize=True` renders the `score` column as a normalized value in
@@ -121,14 +119,18 @@ class Evaluation(dspy.Prediction):
             A markdown table string. If no rows remain after filtering, the
             header is still returned so the caller gets a valid empty table.
         """
-        rows = [
-            _metric_to_markdown_row(
-                metric, columns=columns, normalize=normalize)
-            for metric in self._flattened_results
+        filtered_metrics = [
+            metric for metric in self._flattened_results
             if not exclude_positive or metric.score != metric.max  # type:ignore
         ]
-        widths = _compute_markdown_widths(columns, rows)
-        header = _render_markdown_row(columns, widths)
+        resolved_columns = list(columns) if columns is not None else _default_markdown_columns(filtered_metrics)
+        rows = [
+            _metric_to_markdown_row(
+                metric, columns=resolved_columns, normalize=normalize)
+            for metric in filtered_metrics
+        ]
+        widths = _compute_markdown_widths(resolved_columns, rows)
+        header = _render_markdown_row(resolved_columns, widths)
         separator = _render_markdown_separator(widths)
         body = [_render_markdown_row(row, widths) for row in rows]
         return "\n".join([header, separator, *body])
@@ -193,26 +195,34 @@ def _resolve_metric_column(
     criterion_parts: list[str],
     normalize: bool,
 ) -> Any:
+    if column in metric.meta:
+        return metric.meta[column]
     if column == "dimension":
         return criterion_parts[0]
     if column == "metric":
         return criterion_parts[1]
     if column == "score":
         return _normalize_score(metric) if normalize else metric.score# type:ignore
-    if column == "description":
-        return _metric_description(metric)
     if column == "scale":
         return getattr(metric, "scale", "")
-    if column == "is_llm_judge":
-        return getattr(metric, "is_llm_judge", "")
     return getattr(metric, column, "")
 
 
-def _metric_description(metric: BaseMetricType) -> str:
-    field_info = metric.__class__.model_fields.get("feedback")
-    if not field_info or not field_info.description:
-        return ""
-    return field_info.description
+def _default_markdown_columns(metrics: list[BaseMetricType]) -> list[str]:
+    base_columns = ["dimension", "metric"]
+    discovered_columns: list[str] = []
+    for metric in metrics:
+        for column in _metric_columns(metric):
+            if column not in base_columns and column not in discovered_columns:
+                discovered_columns.append(column)
+    return [*base_columns, *discovered_columns]
+
+
+def _metric_columns(metric: BaseMetricType) -> list[str]:
+    model_columns = list(metric.model_dump().keys())
+    meta_columns = list(metric.meta.keys())
+    trailing_columns = ["scale"]
+    return [*model_columns, *meta_columns, *trailing_columns]
 
 
 def _escape_markdown_cell(value: Any) -> str:
