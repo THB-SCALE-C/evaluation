@@ -1,4 +1,4 @@
-from typing import Any, Iterable, Sequence, cast, override
+from typing import Any, Callable, Iterable, Sequence, cast, override
 import dspy
 from evaluation.dimensions.base import BaseDimension
 import numpy as np
@@ -10,12 +10,12 @@ PATH_DELIMITER = "."
 
 def _flatten_results(results: dict[str, BaseDimension|dict], path_delimiter: str = "%"):
     _flattened: list[BaseMetricType] = []
-    for dimension_name, dimension_value in results.items():
+    for dimension, dimension_value in results.items():
         for metric_name, metric_value in dict(dimension_value).items():
             if not isinstance(metric_value, BaseMetricType):
                 continue
-            key = f"{dimension_name}{path_delimiter}{metric_name}"
-            metric_value._criterion = key
+            metric_value._criterion = metric_name
+            metric_value._meta["dimension"] = metric_value.meta.get("dimension",None) or dimension 
             _flattened.append(metric_value)
     return _flattened
 
@@ -104,10 +104,10 @@ class Evaluation(dspy.Prediction):
         scores = [_normalize_score(val) for val in self.flattened_results]
         return float(np.mean(scores))
 
-    
     def to_markdown_table(
         self,
-        exclude_positive: bool = False,
+        filter_fn: Callable[[BaseMetricType], bool] | None = None,
+        group_by: str | None = None,
         normalize: bool = False,
         columns: Sequence[str] | None = None,
         sort_by: str | None = None,
@@ -125,14 +125,14 @@ class Evaluation(dspy.Prediction):
           cell values so the markdown output stays aligned and readable.
         - `normalize=True` renders the `score` column as a normalized value in
           the `[0, 1]` range while leaving all other columns unchanged.
-        - `exclude_positive=True` filters out metrics whose raw `score` equals
-          `metric.max`, so only non-perfect results remain in the output.
+        - `filter_fn` filters rows before rendering. It receives each
+          `BaseMetricType` and keeps the row when it returns `True`.
+        - `group_by` aggregates rows by the given field before rendering.
         - `sort_by` sorts rows by a single resolved column value when provided.
         - `ascend=True` keeps ascending order; `False` reverses it.
 
         Supported columns are:
         - `dimension`, `metric`: derived from the flattened
-          `criterion` path split by `PATH_DELIMITER`.
         - `score`: raw or normalized score depending on `normalize`.
         - `feedback`: metric feedback.
         - `description`: field description for `feedback` when available.
@@ -144,9 +144,12 @@ class Evaluation(dspy.Prediction):
             A markdown table string. If no rows remain after filtering, the
             header is still returned so the caller gets a valid empty table.
         """
-        filtered_metrics = [
-            metric for metric in self.flattened_results
-            if not exclude_positive or metric.score != metric.max  # type:ignore
+        grouped_metrics = self.flattened_results if group_by is None else _aggregate_metrics_by_field(
+            self.flattened_results,
+            group_by,
+        )
+        filtered_metrics = grouped_metrics if filter_fn is None else [
+            metric for metric in grouped_metrics if filter_fn(metric)
         ]
         resolved_columns = list(columns) if columns is not None else _default_markdown_columns(filtered_metrics)
         if sort_by is not None:
@@ -154,7 +157,6 @@ class Evaluation(dspy.Prediction):
                 key=lambda metric: _stringify_markdown_value(
                     metric,
                     sort_by,
-                    _split_criterion(metric.criterion),
                     normalize,
                 ),
                 reverse=not ascend,
@@ -188,7 +190,7 @@ class Evaluation(dspy.Prediction):
 # Helper Functions
 # ---------------------------------------------------
 def _normalize_score(val: BaseMetricType) -> float:
-    denominator = val.max - val.min
+    denominator = val.max - val.min # type:ignore
     if denominator == 0:
         return 0.0
     return (val.score - val.min) / denominator  # type:ignore
@@ -200,11 +202,25 @@ def _group_metrics_by_field(
 ) -> dict[str, list[tuple[str, BaseMetricType]]]:
     grouped_metrics: dict[str, list[tuple[str, BaseMetricType]]] = {}
     for metric in metrics:
-        criterion_parts = _criterion_parts_map(metric.criterion)
-        group_name = str(criterion_parts.get(group_key, ""))
-        metric_name = str(criterion_parts.get("metric", metric.criterion))
+        group_name = str(getattr(metric, group_key,None) or metric.meta.get(group_key, ""))
+        metric_name = metric.criterion
         grouped_metrics.setdefault(group_name, []).append((metric_name, metric))
     return grouped_metrics
+
+
+def _aggregate_metrics_by_field(
+    metrics: list[BaseMetricType],
+    group_key: str,
+) -> list[BaseMetricType]:
+    aggregated_metrics: list[BaseMetricType] = []
+    for group_name, grouped_metrics in _group_metrics_by_field(metrics, group_key).items():
+        if not grouped_metrics:
+            continue
+        aggregated_metric = _build_group_metric(grouped_metrics)
+        aggregated_metric._criterion = group_key
+        aggregated_metric._meta["dimension"] = group_name
+        aggregated_metrics.append(aggregated_metric)
+    return aggregated_metrics
 
 
 def _build_group_metric(
@@ -280,52 +296,33 @@ def _metric_to_markdown_row(
     columns: Iterable[str],
     normalize: bool = False,
 ) -> list[str]:
-    criterion_parts = _split_criterion(metric.criterion)
     row: list[str] = []
     for column in columns:
         row.append(_stringify_markdown_value(
-            metric, column, criterion_parts, normalize))
+            metric, column, normalize))
     return row
-
-
-def _split_criterion(criterion: str) -> list[str]:
-    parts = criterion.split(PATH_DELIMITER, 2)
-    if len(parts) < 3:
-        parts.extend([""] * (3 - len(parts)))
-    return parts
-
-
-def _criterion_parts_map(criterion: str) -> dict[str, str]:
-    dimension, metric, remainder = _split_criterion(criterion)
-    return {
-        "dimension": dimension,
-        "metric": metric,
-        "criterion": remainder,
-    }
 
 
 def _stringify_markdown_value(
     metric: BaseMetricType,
     column: str,
-    criterion_parts: list[str],
     normalize: bool,
 ) -> str:
-    value = _resolve_metric_column(metric, column, criterion_parts, normalize)
+    value = _resolve_metric_column(metric, column, normalize)
     return _escape_markdown_cell(value)
 
 
 def _resolve_metric_column(
     metric: BaseMetricType,
     column: str,
-    criterion_parts: list[str],
     normalize: bool,
 ) -> Any:
     if column in metric.meta:
         return metric.meta[column]
     if column == "dimension":
-        return criterion_parts[0]
+        return metric.meta["dimension"]
     if column == "metric":
-        return criterion_parts[1]
+        return metric.criterion
     if column == "score":
         return _normalize_score(metric) if normalize else metric.score# type:ignore
     if column == "scale":
