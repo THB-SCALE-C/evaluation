@@ -1,7 +1,8 @@
-from typing import Any, Iterable, Sequence, override
+from typing import Any, Iterable, Sequence, cast, override
 import dspy
 from evaluation.dimensions.base import BaseDimension
 import numpy as np
+from pydantic import create_model
 from evaluation.types.assessment_types import BaseMetricType
 
 PATH_DELIMITER = "."
@@ -26,7 +27,7 @@ class Evaluation(dspy.Prediction):
     def __init__(self, results: dict[str, BaseDimension|dict], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.results = results
-        self._flattened_results = _flatten_results(
+        self.flattened_results = _flatten_results(
             results, path_delimiter=PATH_DELIMITER)
 
     def __repr__(self):
@@ -57,7 +58,26 @@ class Evaluation(dspy.Prediction):
         return self.to_dict(normalize=normalize).get(key, default)
 
     def to_dict(self, normalize:bool=True) -> dict:
-        return {e.criterion:e.model_dump() for e in self._flattened_results}
+        return {e.criterion:e.model_dump() for e in self.flattened_results}
+
+    def fields(self) -> list[str]:
+        return _available_metric_fields(self.flattened_results)
+
+    def to_group_level(self, group_key: str = "dimension") -> "Evaluation":
+        group_results: dict[str, BaseDimension] = {}
+        grouped_metrics = _group_metrics_by_field(
+            self.flattened_results, group_key=group_key)
+
+        for group_name, metrics in grouped_metrics.items():
+            if not metrics:
+                continue
+            aggregated_metric = _build_group_metric(metrics)
+            group_results[group_name] = _build_group_result(
+                group_name=group_name,
+                metric=aggregated_metric,
+            )
+
+        return Evaluation(results=group_results)
 
     def total_score(self, penalties: list[str] = []) -> float:
         """
@@ -72,7 +92,7 @@ class Evaluation(dspy.Prediction):
         - prefix wildcard: `"*.metric"`
         """
         for penalty in penalties:
-            for metric in self._flattened_results:
+            for metric in self.flattened_results:
                 if penalty.endswith("*"):
                     penalized = penalty.removesuffix("*") in metric.criterion
                 elif penalty.startswith("*"):
@@ -81,19 +101,22 @@ class Evaluation(dspy.Prediction):
                     penalized = metric.criterion == penalty
                 if penalized and metric.score == metric.min:  # type:ignore
                     return 0.0
-        scores = [_normalize_score(val) for val in self._flattened_results]
+        scores = [_normalize_score(val) for val in self.flattened_results]
         return float(np.mean(scores))
 
+    
     def to_markdown_table(
         self,
         exclude_positive: bool = False,
         normalize: bool = False,
         columns: Sequence[str] | None = None,
+        sort_by: str | None = None,
+        ascend: bool = True,
     ) -> str:
         """
         Render flattened evaluation metrics as a markdown table.
 
-        The table is generated from `self._flattened_results` and keeps the
+        The table is generated from `self.flattened_results` and keeps the
         implementation intentionally simple and fast:
 
         - `columns` fully defines which columns are included and in which order.
@@ -104,6 +127,8 @@ class Evaluation(dspy.Prediction):
           the `[0, 1]` range while leaving all other columns unchanged.
         - `exclude_positive=True` filters out metrics whose raw `score` equals
           `metric.max`, so only non-perfect results remain in the output.
+        - `sort_by` sorts rows by a single resolved column value when provided.
+        - `ascend=True` keeps ascending order; `False` reverses it.
 
         Supported columns are:
         - `dimension`, `metric`: derived from the flattened
@@ -120,10 +145,20 @@ class Evaluation(dspy.Prediction):
             header is still returned so the caller gets a valid empty table.
         """
         filtered_metrics = [
-            metric for metric in self._flattened_results
+            metric for metric in self.flattened_results
             if not exclude_positive or metric.score != metric.max  # type:ignore
         ]
         resolved_columns = list(columns) if columns is not None else _default_markdown_columns(filtered_metrics)
+        if sort_by is not None:
+            filtered_metrics.sort(
+                key=lambda metric: _stringify_markdown_value(
+                    metric,
+                    sort_by,
+                    _split_criterion(metric.criterion),
+                    normalize,
+                ),
+                reverse=not ascend,
+            )
         rows = [
             _metric_to_markdown_row(
                 metric, columns=resolved_columns, normalize=normalize)
@@ -159,6 +194,87 @@ def _normalize_score(val: BaseMetricType) -> float:
     return (val.score - val.min) / denominator  # type:ignore
 
 
+def _group_metrics_by_field(
+    metrics: list[BaseMetricType],
+    group_key: str,
+) -> dict[str, list[tuple[str, BaseMetricType]]]:
+    grouped_metrics: dict[str, list[tuple[str, BaseMetricType]]] = {}
+    for metric in metrics:
+        criterion_parts = _criterion_parts_map(metric.criterion)
+        group_name = str(criterion_parts.get(group_key, ""))
+        metric_name = str(criterion_parts.get("metric", metric.criterion))
+        grouped_metrics.setdefault(group_name, []).append((metric_name, metric))
+    return grouped_metrics
+
+
+def _build_group_metric(
+    metrics: list[tuple[str, BaseMetricType]],
+) -> BaseMetricType:
+    metric_cls = _resolve_group_metric_class(metrics)
+    mean_score = float(np.mean([metric.score for _, metric in metrics]))
+    feedback = "\n".join(
+        f"{criterion_name}: {metric.feedback}" for criterion_name, metric in metrics
+    )
+    aggregated_metric = metric_cls(
+        score=mean_score,
+        feedback=feedback,
+    )
+    aggregated_metric._meta = _build_group_meta(metrics)
+    return aggregated_metric
+
+
+def _resolve_group_metric_class(
+    metrics: list[tuple[str, BaseMetricType]],
+) -> type[BaseMetricType]:
+    source_metric = metrics[0][1]
+    aggregated_metric_cls = cast(
+        type[BaseMetricType],
+        create_model(
+            f"{source_metric.__class__.__name__}DimensionLevel",
+            __base__=BaseMetricType,
+            score=(float, ...),
+            feedback=(str, ...),
+        ),
+    )
+    aggregated_metric_cls.type = source_metric.type
+    aggregated_metric_cls.scale = source_metric.scale
+    aggregated_metric_cls.max = source_metric.max
+    aggregated_metric_cls.min = source_metric.min
+    return aggregated_metric_cls
+
+
+def _build_group_meta(
+    metrics: list[tuple[str, BaseMetricType]],
+) -> dict[str, Any]:
+    source_metric = metrics[0][1]
+    meta = dict(source_metric.meta)
+    meta["old_metrics"] = [
+        {
+            "original_criterion": metric.criterion,
+            "criterion": criterion_name,
+            "score": metric.score,
+            "feedback": metric.feedback,
+        }
+        for criterion_name, metric in metrics
+    ]
+    return meta
+
+
+def _build_group_result(
+    group_name: str,
+    metric: BaseMetricType,
+) -> BaseDimension:
+    dimension_model = cast(
+        type[BaseDimension],
+        create_model(
+            f"{group_name.title().replace('_', '')}GroupLevelResult",
+            __base__=BaseDimension,
+            **{group_name: (metric.__class__, ...)},
+        ),
+    )
+    return dimension_model(**{group_name: metric})
+
+
 def _metric_to_markdown_row(
     metric: BaseMetricType,
     columns: Iterable[str],
@@ -177,6 +293,15 @@ def _split_criterion(criterion: str) -> list[str]:
     if len(parts) < 3:
         parts.extend([""] * (3 - len(parts)))
     return parts
+
+
+def _criterion_parts_map(criterion: str) -> dict[str, str]:
+    dimension, metric, remainder = _split_criterion(criterion)
+    return {
+        "dimension": dimension,
+        "metric": metric,
+        "criterion": remainder,
+    }
 
 
 def _stringify_markdown_value(
@@ -209,12 +334,19 @@ def _resolve_metric_column(
 
 
 def _default_markdown_columns(metrics: list[BaseMetricType]) -> list[str]:
+    return _available_metric_fields(metrics)
+
+
+def _available_metric_fields(metrics: list[BaseMetricType]) -> list[str]:
     base_columns = ["dimension", "metric"]
     discovered_columns: list[str] = []
+    seen_columns = set(base_columns)
     for metric in metrics:
         for column in _metric_columns(metric):
-            if column not in base_columns and column not in discovered_columns:
-                discovered_columns.append(column)
+            if column in seen_columns:
+                continue
+            seen_columns.add(column)
+            discovered_columns.append(column)
     return [*base_columns, *discovered_columns]
 
 

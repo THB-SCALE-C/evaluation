@@ -233,6 +233,7 @@ class RuleBasedJudge(_BaseJudge):
         processed_results: MetricResultMap = {}
         for metric in self.rule_based_metrics:
             result = metric(slides, **context)  # type: ignore[misc]
+            result = result
             store_metric_result(processed_results, result)
         return processed_results
 

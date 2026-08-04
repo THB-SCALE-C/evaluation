@@ -8,10 +8,19 @@ JudgeMetricSpec: TypeAlias = tuple[str, Any, type[BaseDimension]]
 FlattenedMetricMap: TypeAlias = dict[str, tuple[str, str]]
 
 
-
 def store_metric_result(results: MetricResultMap, metric_result: BaseDimension) -> None:
     _attach_dimension_field_metadata(metric_result)
-    results[metric_result.dimension_name] = metric_result
+    dimension_name = metric_result.dimension_name
+    incoming_metrics = _dimension_to_metric_dict(metric_result)
+    existing_metrics = results.get(dimension_name)
+
+    if existing_metrics is None:
+        results[dimension_name] = incoming_metrics
+        return
+
+    merged_metrics = _dimension_to_metric_dict(existing_metrics)
+    merged_metrics.update(incoming_metrics)
+    results[dimension_name] = merged_metrics
 
 
 def merge_metric_results(*result_maps: MetricResultMap) -> MetricResultMap:
@@ -19,7 +28,7 @@ def merge_metric_results(*result_maps: MetricResultMap) -> MetricResultMap:
 
     for result_map in result_maps:
         for scope_key, metrics in result_map.items():
-            merged.setdefault(scope_key, {}).update(metrics)
+            merged.setdefault(scope_key, {}).update(_dimension_to_metric_dict(metrics))
 
     return merged
 
@@ -101,3 +110,18 @@ def _build_metric_meta(metric_result: BaseDimension, field_info: Any) -> dict[st
     meta["description"] = field_info.description or ""
     meta["is_llm_judge"] = bool(getattr(metric_result.__class__, "is_llm_judge", False))
     return meta
+
+
+def _dimension_to_metric_dict(metric_result: BaseDimension | dict) -> dict[str, BaseMetricType]:
+    if isinstance(metric_result, dict):
+        return {
+            field_name: metric_value
+            for field_name, metric_value in metric_result.items()
+            if isinstance(metric_value, BaseMetricType)
+        }
+
+    return {
+        field_name: metric_value
+        for field_name, metric_value in dict(metric_result).items()
+        if isinstance(metric_value, BaseMetricType)
+    }
